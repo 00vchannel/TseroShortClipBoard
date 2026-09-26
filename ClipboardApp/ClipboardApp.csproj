@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ZeroZeroClipboard</AssemblyName>
+    <RootNamespace>ClipboardApp</RootNamespace>
+    <Version>2.0.0</Version>
+    <ApplicationIcon>..\assets\00monstericon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ClipboardCore\ClipboardCore.csproj" />
+  </ItemGroup>
+</Project>

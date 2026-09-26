@@ -1,0 +1,6 @@
+customtkinter==5.2.1
+keyboard==0.13.5
+pyperclip==1.9.0
+pyinstaller==6.3.0
+pillow==10.2.0
+pystray==0.19.5

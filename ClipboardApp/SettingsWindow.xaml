@@ -1,0 +1,49 @@
+<Window x:Class="ClipboardApp.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="設定" Width="540" Height="570" MinWidth="460" MinHeight="500" WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Styles/Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <Border Background="{DynamicResource PageBrush}" Padding="24">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="偏好設定" FontSize="23" FontWeight="Bold" Margin="0,0,0,20"/>
+                <Border Background="{DynamicResource CardBrush}" CornerRadius="18" Padding="18" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="呼出快捷鍵" FontWeight="SemiBold" Margin="0,0,0,7"/>
+                        <ComboBox x:Name="HotkeyCombo" Height="39" SelectionChanged="HotkeyCombo_SelectionChanged"/>
+                        <TextBlock Text="右 Alt 為預設。若與其他程式衝突，可改用功能鍵。" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+                <Border Background="{DynamicResource CardBrush}" CornerRadius="18" Padding="18" Margin="0,0,0,12">
+                    <StackPanel>
+                        <CheckBox x:Name="AutostartCheck" Content="登入 Windows 時啟動" Checked="AutostartCheck_Changed" Unchecked="AutostartCheck_Changed" Margin="0,0,0,13"/>
+                        <TextBlock Text="外觀" FontWeight="SemiBold" Margin="0,0,0,7"/>
+                        <ComboBox x:Name="ThemeCombo" Height="39" SelectionChanged="ThemeCombo_SelectionChanged" Margin="0,0,0,15"/>
+                        <TextBlock Text="文字大小" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Slider x:Name="FontScaleSlider" Minimum="0.75" Maximum="1.75" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                    ValueChanged="FontScaleSlider_ValueChanged" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                            <TextBlock x:Name="FontScaleLabel" Grid.Column="1" Width="46" VerticalAlignment="Center"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+                <Border Background="{DynamicResource CardBrush}" CornerRadius="18" Padding="18" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="本機備份位置" FontWeight="SemiBold" Margin="0,0,0,7"/>
+                        <TextBlock x:Name="BackupPathText" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10"/>
+                        <Button Content="選擇資料夾" HorizontalAlignment="Left" Click="ChooseBackupDirectory_Click"/>
+                    </StackPanel>
+                </Border>
+                <TextBlock x:Name="StatusText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="2,0,0,14"/>
+                <Button Content="完成" Style="{StaticResource AccentButton}" HorizontalAlignment="Right" MinWidth="96" Click="Done_Click"/>
+            </StackPanel>
+        </ScrollViewer>
+    </Border>
+</Window>

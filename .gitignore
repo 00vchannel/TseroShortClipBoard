@@ -1,0 +1,31 @@
+# 使用者文字與本機備份不可提交或發佈
+/backup/
+/clipboard_data.json
+/settings.json
+/dist/
+/release-v2/
+/ui-preview/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.exe
+
+# .NET 建置產物
+**/bin/
+**/obj/
+/publish/
+/.build-appdata/
+/.build-localappdata/
+/ClipboardApp/.build-appdata/
+/ClipboardApp/.build-localappdata/
+/ClipboardApp/.build-packages/
+/ClipboardCore.Tests/.test-output/
+/ClipboardApp.Smoke/.test-output/
+
+# 舊版建置產物
+/build/
+/.build-ui-smoke/
+__pycache__/
