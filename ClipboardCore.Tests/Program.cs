@@ -32,6 +32,11 @@ try
 
     var first = repository.ListSnippets()[0];
     repository.SaveDraft(new SnippetDraft { SnippetId = first.Id, Title = "草稿", Content = "未正式儲存", CategoryId = first.CategoryId });
+    Expect<InvalidOperationException>(() => repository.PermanentlyDeleteSnippets([first.Id]), "不得永久刪除正常文字或其草稿");
+    Check(repository.GetDraft(first.Id) is not null && repository.GetSnippet(first.Id) is { IsDeleted: false }, "錯誤永久刪除保留草稿與正式文字");
+    repository.MoveSnippets([first.Id], null);
+    Check(repository.GetSnippet(first.Id)!.CategoryId is null && repository.GetDraft(first.Id)!.CategoryId is null,
+        "搬移文字同步草稿分類");
     Check(repository.GetSnippet(first.Id)!.Content == original.snippets[0].content, "草稿不改正式內容");
     repository.SaveSnippet(first with { Title = "已儲存", Content = "新正文" });
     Check(repository.GetDraft(first.Id) is null, "儲存後清除草稿");
@@ -107,6 +112,56 @@ try
     Expect<InvalidDataException>(() => empty.ImportLegacy(damagedPath), "損壞匯入必須失敗");
     Check(!File.Exists(Path.Combine(isolatedRoot, "empty", "clipboard.db")), "損壞匯入不建立空白庫");
 
+    var freshDirectory = Path.Combine(isolatedRoot, "fresh");
+    var fresh = new ClipboardRepository(freshDirectory);
+    fresh.Initialize();
+    fresh.CompleteSetup();
+    Check(fresh.IsSetupComplete() && fresh.ListSnippets().Count == 0, "全新用戶可建立空資料庫");
+    var freshSnippet = fresh.SaveSnippet(new Snippet { Title = "", Emoji = "", Content = "含 NUL\0與換行\r\n" });
+    Check(fresh.GetSnippet(freshSnippet.Id)!.Content == freshSnippet.Content, "空標題及特殊文字完整保存");
+    var freshBackup = Path.Combine(isolatedRoot, "fresh.sqlite");
+    fresh.CreateBackup(freshBackup);
+    var freshReopened = new ClipboardRepository(freshDirectory);
+    freshReopened.Initialize();
+    Check(freshReopened.IsSetupComplete() && freshReopened.ListSnippets().Count == 1, "全新資料重新啟動不需舊版匯入");
+    // Build malformed SQLite files through the internal wrapper, using only synthetic data.
+    var sqliteType = typeof(ClipboardRepository).Assembly.GetType("ClipboardCore.SqliteDb")!;
+    void CreateInvalidDatabase(string path, params string[] statements)
+    {
+        using var db = (IDisposable)Activator.CreateInstance(sqliteType, [path, false])!;
+        foreach (var sql in statements) sqliteType.GetMethod("Execute")!.Invoke(db, [sql, Array.Empty<object?>()]);
+    }
+    var invalidBackup = Path.Combine(isolatedRoot, "wrong-schema.sqlite");
+    CreateInvalidDatabase(invalidBackup, "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
+        "INSERT INTO meta VALUES('schema_version','1')");
+    var invalidBytes = File.ReadAllBytes(invalidBackup);
+    Expect<InvalidDataException>(() => fresh.RestoreBackup(invalidBackup), "不接受其他 SQLite 檔案");
+    Check(fresh.GetSnippet(freshSnippet.Id)!.Content == freshSnippet.Content, "拒絕錯誤備份時保留原文");
+    Check(File.ReadAllBytes(invalidBackup).SequenceEqual(invalidBytes), "檢查備份不修改來源檔案");
+    var invalidIdBackup = Path.Combine(isolatedRoot, "invalid-id.sqlite");
+    File.Copy(freshBackup, invalidIdBackup);
+    CreateInvalidDatabase(invalidIdBackup, "UPDATE snippets SET id='invalid-id'");
+    Expect<InvalidDataException>(() => fresh.RestoreBackup(invalidIdBackup), "拒絕有無效識別碼的備份");
+    Check(fresh.GetSnippet(freshSnippet.Id)!.Content == freshSnippet.Content, "拒絕無效資料時原文不變");
+    var incompleteDirectory = Path.Combine(isolatedRoot, "incomplete");
+    Directory.CreateDirectory(incompleteDirectory);
+    CreateInvalidDatabase(Path.Combine(incompleteDirectory, "clipboard.db"), "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
+        "INSERT INTO meta VALUES('schema_version','1')");
+    Expect<InvalidDataException>(() => new ClipboardRepository(incompleteDirectory).Initialize(), "不替缺表資料庫補建空資料表");
+
+    var customBackups = Path.Combine(isolatedRoot, "custom-backups");
+    Directory.CreateDirectory(customBackups);
+    var unrelated = Path.Combine(customBackups, "daily-important.db");
+    File.WriteAllText(unrelated, "其他檔案，不能刪除");
+    for (var i = 0; i < 4; i++)
+        fresh.CreateBackup(Path.Combine(customBackups, $"daily-2020010{i + 1}-120000-{Guid.NewGuid():N}.sqlite"));
+    var corruptDaily = Path.Combine(customBackups, $"daily-{DateTime.Now:yyyyMMdd}-000000-{Guid.NewGuid():N}.sqlite");
+    File.WriteAllText(corruptDaily, "不是可用的備份");
+    var daily = fresh.CreateDailyBackup(retainedCount: 2, directory: customBackups);
+    Check(daily is not null && File.Exists(daily) && File.Exists(unrelated), "損壞每日檔案不能阻止備份且不刪除其他檔案");
+    Check(Directory.GetFiles(customBackups, "daily-*.sqlite").Length == 2, "自訂資料夾每日備份遵守保留數量");
+    Check(fresh.CreateDailyBackup(retainedCount: 2, directory: customBackups) is null, "同一天不重複建立可用每日備份");
+
     var actualSources = new[]
     {
         (Data: Path.Combine(workspace, "backup", "pre-v2-20260926-215928", "live-data.json"),
@@ -114,7 +169,8 @@ try
         (Data: Path.Combine(workspace, "backup", "pre-v2-handoff-20260926-222646", "clipboard_data.json"),
          Settings: Path.Combine(workspace, "backup", "pre-v2-handoff-20260926-222646", "settings.json"))
     };
-    foreach (var (actualBackup, actualSettings) in actualSources.Where(source => File.Exists(source.Data)))
+    foreach (var (actualBackup, actualSettings) in actualSources.Where(source =>
+        Environment.GetEnvironmentVariable("ZEROZERO_TEST_PRIVATE_BACKUPS") == "1" && File.Exists(source.Data)))
     {
         var actualRepository = new ClipboardRepository(Path.Combine(isolatedRoot, "actual-" + Guid.NewGuid().ToString("N")));
         var actualResult = actualRepository.ImportLegacy(actualBackup, actualSettings);

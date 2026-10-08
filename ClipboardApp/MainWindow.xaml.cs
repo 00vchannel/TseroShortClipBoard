@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private string editingEmoji = "";
     private bool isLoading;
     private bool allowClose;
+    private bool draftDirty;
     private Point dragStart;
     private Guid? draggingSnippetId;
     private ListBoxItem? draggingSnippetRow;
@@ -70,6 +71,7 @@ public partial class MainWindow : Window
     }
 
     public void AllowClose() => allowClose = true;
+    public bool TryPrepareToClose() => FlushDraft();
 
     private void Controller_Changed(object? sender, EventArgs e)
     {
@@ -150,7 +152,13 @@ public partial class MainWindow : Window
 
     private void ShowMode(ListMode newMode)
     {
-        FlushDraft();
+        if (!FlushDraft())
+        {
+            isLoading = true;
+            ViewSelector.SelectedIndex = (int)mode;
+            isLoading = false;
+            return;
+        }
         mode = newMode;
         SnippetList.Visibility = mode is ListMode.Snippets or ListMode.Drafts ? Visibility.Visible : Visibility.Collapsed;
         SnippetList.DataContext = mode == ListMode.Snippets ? Visibility.Visible : Visibility.Collapsed;
@@ -175,6 +183,7 @@ public partial class MainWindow : Window
         draftTimer.Stop();
         isLoading = true;
         editingId = null;
+        draftDirty = false;
         editingEmoji = "";
         TitleBox.Text = "";
         ContentBox.Text = "";
@@ -197,11 +206,12 @@ public partial class MainWindow : Window
     {
         isLoading = true;
         editingId = snippet.Id;
+        draftDirty = false;
         var draft = !readOnly && snapshot.Drafts.TryGetValue(snippet.Id, out var found) ? found : null;
         editingEmoji = draft?.Emoji ?? snippet.Emoji;
         TitleBox.Text = draft?.Title ?? snippet.Title;
         ContentBox.Text = draft?.Content ?? snippet.Content;
-        SelectEditorCategory(draft?.CategoryId ?? snippet.CategoryId);
+        SelectEditorCategory(draft is null ? snippet.CategoryId : draft.CategoryId);
         DraftStatus.Text = draft is null ? "已儲存" : "有未儲存草稿";
         isLoading = false;
         SetEditorEnabled(true);
@@ -213,17 +223,18 @@ public partial class MainWindow : Window
                                       ?? EditorCategory.Items.Cast<CategoryChoice>().FirstOrDefault();
     }
 
-    private void FlushDraft()
+    private bool FlushDraft()
     {
         draftTimer.Stop();
-        if (isLoading || editingId is not Guid id || mode is not (ListMode.Snippets or ListMode.Drafts)) return;
-        if (DraftStatus.Text != "尚未儲存") return;
+        if (isLoading || editingId is not Guid id || mode is not (ListMode.Snippets or ListMode.Drafts) || !draftDirty) return true;
         try
         {
             controller.SaveDraft(id, TitleBox.Text, editingEmoji, ContentBox.Text, (EditorCategory.SelectedItem as CategoryChoice)?.Id);
+            draftDirty = false;
             DraftStatus.Text = "草稿已保存";
+            return true;
         }
-        catch (Exception ex) { SetError("草稿保存失敗", ex); }
+        catch (Exception ex) { SetError("草稿保存失敗，請保留目前視窗並重試", ex); return false; }
     }
 
     private void Editor_TextChanged(object sender, TextChangedEventArgs e) => MarkDraftDirty();
@@ -232,6 +243,7 @@ public partial class MainWindow : Window
     {
         if (isLoading || editingId is null || mode is not (ListMode.Snippets or ListMode.Drafts)) return;
         DraftStatus.Text = "尚未儲存";
+        draftDirty = true;
         draftTimer.Stop();
         draftTimer.Start();
     }
@@ -243,8 +255,8 @@ public partial class MainWindow : Window
         try
         {
             var savedId = controller.SaveSnippet(id, TitleBox.Text, editingEmoji, ContentBox.Text, (EditorCategory.SelectedItem as CategoryChoice)?.Id);
-            controller.DiscardDraft(id);
             editingId = savedId;
+            draftDirty = false;
             DraftStatus.Text = "已儲存";
             if (mode == ListMode.Drafts) ShowMode(ListMode.Snippets);
             RefreshSnapshot();
@@ -254,13 +266,14 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             DraftStatus.Text = "儲存失敗，內容仍在編輯區";
+            draftDirty = true;
             SetError("儲存失敗", ex);
         }
     }
 
     private void NewSnippet_Click(object sender, RoutedEventArgs e)
     {
-        FlushDraft();
+        if (!FlushDraft()) return;
         SnippetList.SelectedItems.Clear();
         isLoading = true;
         editingId = Guid.NewGuid();
@@ -269,6 +282,7 @@ public partial class MainWindow : Window
         ContentBox.Text = "";
         SelectEditorCategory(selectedCategoryId);
         DraftStatus.Text = "尚未儲存";
+        draftDirty = true;
         isLoading = false;
         SetEditorEnabled(true);
         TitleBox.Focus();
@@ -279,7 +293,13 @@ public partial class MainWindow : Window
         if (isLoading) return;
         var next = SnippetList.SelectedItem as SnippetView;
         if (next is null || next.Id == editingId) return;
-        FlushDraft();
+        if (!FlushDraft())
+        {
+            isLoading = true;
+            SnippetList.SelectedItem = SnippetList.Items.Cast<SnippetView>().FirstOrDefault(s => s.Id == editingId);
+            isLoading = false;
+            return;
+        }
         LoadSnippet(next);
     }
 
@@ -320,7 +340,13 @@ public partial class MainWindow : Window
     private void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (isLoading || CategoryList.SelectedItem is not CategoryChoice item) return;
-        FlushDraft();
+        if (!FlushDraft())
+        {
+            isLoading = true;
+            CategoryList.SelectedItem = CategoryList.Items.Cast<CategoryChoice>().FirstOrDefault(c => c.Id == selectedCategoryId);
+            isLoading = false;
+            return;
+        }
         selectedCategoryId = item.Id;
         ShowMode(ListMode.Snippets);
     }
@@ -418,7 +444,15 @@ public partial class MainWindow : Window
         choices.AddRange(snapshot.Categories.OrderBy(c => c.SortOrder).Select(c => new CategoryChoice(c.Id, c.Name)));
         var choice = UiPrompt.Choose(this, "搬移文字", "目標分類", choices);
         if (choice is null) return;
-        try { controller.MoveSnippets(ids, choice.Id); RefreshSnapshot(); SetStatus($"已搬移 {ids.Count} 筆文字"); }
+        try
+        {
+            if (!FlushDraft()) return;
+            controller.MoveSnippets(ids, choice.Id);
+            RefreshSnapshot();
+            if (editingId is Guid current && ids.Contains(current) && snapshot.Snippets.FirstOrDefault(s => s.Id == current) is { } edited)
+                LoadSnippet(edited);
+            SetStatus($"已搬移 {ids.Count} 筆文字");
+        }
         catch (Exception ex) { SetError("搬移失敗", ex); }
     }
 
@@ -428,7 +462,7 @@ public partial class MainWindow : Window
         if (ids.Count == 0) { SetStatus("請先選擇文字"); return; }
         try
         {
-            FlushDraft();
+            if (!FlushDraft()) return;
             controller.DeleteSnippets(ids);
             if (editingId is Guid id && ids.Contains(id)) ClearEditor();
             RefreshSnapshot();
@@ -444,7 +478,7 @@ public partial class MainWindow : Window
         if (!UiPrompt.Confirm(this, "刪除文字", $"將「{snippet.Title}」移至垃圾桶？之後仍可復原。", "移至垃圾桶")) return;
         try
         {
-            if (editingId == snippet.Id) FlushDraft();
+            if (editingId == snippet.Id && !FlushDraft()) return;
             controller.DeleteSnippets(new[] { snippet.Id });
             if (editingId == snippet.Id) ClearEditor();
             RefreshSnapshot();
@@ -511,7 +545,7 @@ public partial class MainWindow : Window
 
     private void Backup_Click(object sender, RoutedEventArgs e)
     {
-        FlushDraft();
+        if (!FlushDraft()) return;
         try
         {
             var path = controller.CreateBackup();
@@ -525,7 +559,7 @@ public partial class MainWindow : Window
         var dialog = new OpenFileDialog { Title = "選擇零零快捷剪貼板備份", Filter = "備份檔 (*.db;*.sqlite)|*.db;*.sqlite|所有檔案 (*.*)|*.*" };
         if (dialog.ShowDialog(this) != true) return;
         if (!UiPrompt.Confirm(this, "還原備份", $"還原「{System.IO.Path.GetFileName(dialog.FileName)}」將取代目前資料。還原前會先備份現況。確定繼續？", "還原備份")) return;
-        FlushDraft();
+        if (!FlushDraft()) return;
         try
         {
             controller.RestoreBackup(dialog.FileName);
@@ -555,7 +589,7 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        FlushDraft();
+        if (!FlushDraft()) { e.Cancel = true; return; }
         if (!allowClose) { e.Cancel = true; Hide(); }
         else
         {
@@ -687,6 +721,25 @@ public partial class MainWindow : Window
 
 internal static class UiPrompt
 {
+    public static string? ChooseStartup()
+    {
+        var dialog = MakeDialog(null, "歡迎使用零零快捷剪貼板");
+        var panel = DialogBody("第一次使用？");
+        panel.Children.Add(new TextBlock { Text = "可以直接開始，也能匯入以前保存的文字。", TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 18) });
+        string? choice = null;
+        foreach (var (value, label) in new[] { ("new", "開始使用"), ("import", "匯入舊版備份"), ("cancel", "取消") })
+        {
+            var button = new Button { Content = label, Margin = new Thickness(0, 0, 0, 8),
+                IsCancel = value == "cancel", IsDefault = value == "new",
+                Style = (Style)dialog.FindResource(value == "new" ? "AccentButton" : typeof(Button)) };
+            button.Click += (_, _) => { choice = value == "cancel" ? null : value; dialog.DialogResult = value != "cancel"; };
+            panel.Children.Add(button);
+        }
+        SetBody(dialog, panel);
+        return dialog.ShowDialog() == true ? choice : null;
+    }
+
     public static string? Ask(Window owner, string title, string label, string initial = "")
     {
         var dialog = MakeDialog(owner, title);
@@ -739,7 +792,8 @@ internal static class UiPrompt
     {
         var dialog = new Window
         {
-            Owner = owner, Title = title, Width = 440, SizeToContent = SizeToContent.Height,
+            Owner = owner, Title = title, Width = Math.Min(440, SystemParameters.WorkArea.Width - 24),
+            MaxHeight = Math.Max(200, SystemParameters.WorkArea.Height - 24), SizeToContent = SizeToContent.Height,
             WindowStartupLocation = owner is null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner,
             WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent,
             ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false,
@@ -758,6 +812,12 @@ internal static class UiPrompt
             dialog.DialogResult = false;
             e.Handled = true;
         };
+        dialog.Loaded += (_, _) =>
+        {
+            var light = owner?.TryFindResource("PageBrush") is SolidColorBrush brush && brush.Color.R > 128;
+            UiPreferences.Apply(dialog, new ClipboardSettings("right alt", false, (owner?.FontSize ?? 14) / 14,
+                light ? "light" : "dark", ""));
+        };
         return dialog;
     }
 
@@ -771,7 +831,8 @@ internal static class UiPrompt
 
     private static void SetBody(Window dialog, StackPanel panel)
     {
-        var frame = new Border { Child = panel, CornerRadius = new CornerRadius(18), Padding = new Thickness(24),
+        var frame = new Border { Child = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }, CornerRadius = new CornerRadius(18), Padding = new Thickness(24),
             BorderThickness = new Thickness(1) };
         frame.SetResourceReference(Border.BackgroundProperty, "CardBrush");
         frame.SetResourceReference(Border.BorderBrushProperty, "MutedBrush");

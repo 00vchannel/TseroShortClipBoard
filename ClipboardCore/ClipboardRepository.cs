@@ -10,6 +10,12 @@ public sealed partial class ClipboardRepository(string dataDirectory)
 
     public void Initialize()
     {
+        // Existing data must be checked before CREATE TABLE can conceal a missing table.
+        if (File.Exists(DatabasePath))
+        {
+            ValidateExisting();
+            return;
+        }
         Directory.CreateDirectory(_dataDirectory);
         using var db = Open();
         db.Transaction(() =>
@@ -26,6 +32,29 @@ public sealed partial class ClipboardRepository(string dataDirectory)
             else if (version != "1") throw new InvalidDataException($"資料格式版本 {version} 不受支援");
         });
         ValidateDatabase(db);
+    }
+
+    public void ValidateExisting()
+    {
+        if (!File.Exists(DatabasePath)) throw new FileNotFoundException("找不到原有資料庫，請先從備份復原。", DatabasePath);
+        using var db = new SqliteDb(DatabasePath, readOnly: true);
+        ValidateDatabase(db);
+    }
+
+    public bool IsSetupComplete()
+        => GetMeta("setup_complete") == "1" || GetMeta("legacy_imported") == "1";
+
+    public void CompleteSetup()
+    {
+        using var db = Open();
+        ValidateDatabase(db);
+        db.Execute("INSERT INTO meta(key,value) VALUES('setup_complete','1') ON CONFLICT(key) DO UPDATE SET value='1'");
+    }
+
+    private string? GetMeta(string key)
+    {
+        using var db = new SqliteDb(DatabasePath, readOnly: true);
+        return db.Scalar("SELECT value FROM meta WHERE key=?", r => r.Text(0), key);
     }
 
     public IReadOnlyList<Category> ListCategories()
@@ -147,6 +176,8 @@ public sealed partial class ClipboardRepository(string dataDirectory)
         {
             foreach (var id in ids)
             {
+                if (db.Scalar("SELECT 1 FROM snippets WHERE id=? AND deleted_at IS NOT NULL", r => r.Number(0), id) != 1)
+                    throw new InvalidOperationException("只能永久刪除垃圾桶內的文字");
                 db.Execute("DELETE FROM drafts WHERE snippet_id=?", id);
                 db.Execute("DELETE FROM snippets WHERE id=? AND deleted_at IS NOT NULL", id);
             }
@@ -163,6 +194,7 @@ public sealed partial class ClipboardRepository(string dataDirectory)
             {
                 RequireSnippet(db, snippetId);
                 db.Execute("UPDATE snippets SET category_id=? WHERE id=?", categoryId, snippetId);
+                db.Execute("UPDATE drafts SET category_id=? WHERE snippet_id=?", categoryId, snippetId);
             }
         });
     }
@@ -273,10 +305,12 @@ public sealed partial class ClipboardRepository(string dataDirectory)
     }
 
     private SqliteDb Open() => new(DatabasePath);
-    private static Category ReadCategory(SqliteDb.RowReader r) => new() { Id = r.Guid(0), Name = r.Text(1)!, SortOrder = (int)r.Number(2) };
-    private static Snippet ReadSnippet(SqliteDb.RowReader r) => new() { Id = r.Guid(0), Emoji = r.Text(1)!, Title = r.Text(2)!, CategoryId = r.NullableGuid(3), Content = r.Text(4)!, SortOrder = (int)r.Number(5), IsDeleted = !r.IsNull(6) };
-    private static SnippetDraft ReadDraft(SqliteDb.RowReader r) => new() { SnippetId = r.Guid(0), Emoji = r.Text(1)!, Title = r.Text(2)!, CategoryId = r.NullableGuid(3), Content = r.Text(4)!, UpdatedAtUtc = DateTimeOffset.Parse(r.Text(5)!) };
-    private static HistoryEntry ReadHistory(SqliteDb.RowReader r) => new() { Id = r.Guid(0), Content = r.Text(1)!, CopiedAtUtc = DateTimeOffset.Parse(r.Text(2)!) };
+    private static string RequiredText(SqliteDb.RowReader r, int column) => r.Text(column)
+        ?? throw new InvalidDataException("資料中有缺少的文字欄位");
+    private static Category ReadCategory(SqliteDb.RowReader r) => new() { Id = r.Guid(0), Name = RequiredText(r, 1), SortOrder = (int)r.Number(2) };
+    private static Snippet ReadSnippet(SqliteDb.RowReader r) => new() { Id = r.Guid(0), Emoji = RequiredText(r, 1), Title = RequiredText(r, 2), CategoryId = r.NullableGuid(3), Content = RequiredText(r, 4), SortOrder = (int)r.Number(5), IsDeleted = !r.IsNull(6) };
+    private static SnippetDraft ReadDraft(SqliteDb.RowReader r) => new() { SnippetId = r.Guid(0), Emoji = RequiredText(r, 1), Title = RequiredText(r, 2), CategoryId = r.NullableGuid(3), Content = RequiredText(r, 4), UpdatedAtUtc = DateTimeOffset.Parse(RequiredText(r, 5)) };
+    private static HistoryEntry ReadHistory(SqliteDb.RowReader r) => new() { Id = r.Guid(0), Content = RequiredText(r, 1), CopiedAtUtc = DateTimeOffset.Parse(RequiredText(r, 2)) };
     private static int NextOrder(SqliteDb db, string table) => (int)(db.Scalar($"SELECT COALESCE(MAX(sort_order),-1)+1 FROM {table}", r => r.Number(0)));
     private static bool ExistsSnippet(SqliteDb db, Guid id) => db.Scalar("SELECT 1 FROM snippets WHERE id=?", r => r.Number(0), id) == 1;
     private static void RequireCategory(SqliteDb db, Guid id)
@@ -301,5 +335,23 @@ public sealed partial class ClipboardRepository(string dataDirectory)
     {
         if (db.Scalar("PRAGMA integrity_check", r => r.Text(0)) != "ok") throw new InvalidDataException("資料庫完整性檢查失敗");
         if (db.Scalar("PRAGMA foreign_key_check", r => r.Text(0)) is not null) throw new InvalidDataException("資料庫關聯檢查失敗");
+        try
+        {
+            if (db.Scalar("SELECT value FROM meta WHERE key='schema_version'", r => r.Text(0)) != "1")
+                throw new InvalidDataException("這不是支援的剪貼板資料庫或備份");
+            // Read every required column and validate IDs and dates before accepting a backup.
+            db.Query("SELECT id,name,sort_order FROM categories", ReadCategory);
+            db.Query("SELECT id,emoji,title,category_id,content,sort_order,deleted_at FROM snippets", ReadSnippet);
+            db.Query("SELECT snippet_id,emoji,title,category_id,content,updated_at FROM drafts", ReadDraft);
+            db.Query("SELECT id,content,copied_at FROM history", ReadHistory);
+            db.Query("SELECT key,value FROM settings", r => (RequiredText(r, 0), RequiredText(r, 1)));
+            if (db.Scalar("SELECT COUNT(*) FROM snippets s LEFT JOIN categories c ON c.id=s.category_id WHERE s.category_id IS NOT NULL AND c.id IS NULL", r => r.Number(0)) != 0 ||
+                db.Scalar("SELECT COUNT(*) FROM drafts d LEFT JOIN categories c ON c.id=d.category_id WHERE d.category_id IS NOT NULL AND c.id IS NULL", r => r.Number(0)) != 0)
+                throw new InvalidDataException("資料引用不存在的分類");
+        }
+        catch (Exception ex) when (ex is IOException or FormatException or ArgumentNullException)
+        {
+            throw new InvalidDataException("剪貼板資料或備份格式不完整，未接受此檔案。", ex);
+        }
     }
 }

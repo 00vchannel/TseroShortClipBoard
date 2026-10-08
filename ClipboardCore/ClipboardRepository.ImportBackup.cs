@@ -125,7 +125,16 @@ public sealed partial class ClipboardRepository
                 current.Execute("PRAGMA wal_checkpoint(TRUNCATE)");
                 current.Execute("PRAGMA journal_mode=DELETE");
             }
-            File.Replace(stagingPath, DatabasePath, null);
+            for (var attempt = 0; ; attempt++)
+            {
+                try { File.Replace(stagingPath, DatabasePath, null); break; }
+                catch (IOException ex) when (attempt < 4 && (ex.HResult & 0xFFFF) is 32 or 33 or 1175 &&
+                    File.Exists(stagingPath) && File.Exists(DatabasePath))
+                {
+                    // Retry only a sharing/lock failure while the staged file is still in place.
+                    Thread.Sleep(100);
+                }
+            }
             RemoveIfExists(DatabasePath + "-wal");
             RemoveIfExists(DatabasePath + "-shm");
             Initialize();
@@ -139,17 +148,30 @@ public sealed partial class ClipboardRepository
         }
     }
 
-    public string? CreateDailyBackup(int retainedCount = 30)
+    public string? CreateDailyBackup(int retainedCount = 30, string? directory = null)
     {
         if (retainedCount < 1) throw new ArgumentOutOfRangeException(nameof(retainedCount));
-        var backupDirectory = Path.Combine(_dataDirectory, "backups");
+        var backupDirectory = Path.GetFullPath(directory ?? Path.Combine(_dataDirectory, "backups"));
         Directory.CreateDirectory(backupDirectory);
         var today = DateTimeOffset.Now.ToString("yyyyMMdd");
-        if (Directory.GetFiles(backupDirectory, $"daily-{today}-*.sqlite").Length > 0) return null;
+        var dailyFiles = Directory.EnumerateFiles(backupDirectory, "daily-*")
+            .Where(path => System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(path),
+                @"^daily-\d{8}-\d{6}-[0-9a-f]{32}\.(sqlite|db)$", System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+            .ToList();
+        foreach (var existing in dailyFiles.Where(path => Path.GetFileName(path).StartsWith($"daily-{today}-", StringComparison.Ordinal)))
+        {
+            try
+            {
+                using var candidate = new SqliteDb(existing, readOnly: true);
+                ValidateDatabase(candidate);
+                return null;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException) { /* A damaged file does not satisfy today's backup. */ }
+        }
         var path = Path.Combine(backupDirectory, $"daily-{today}-{DateTimeOffset.Now:HHmmss}-{Guid.NewGuid():N}.sqlite");
         CreateBackup(path);
-        foreach (var old in Directory.GetFiles(backupDirectory, "daily-*.sqlite")
-                     .OrderByDescending(File.GetCreationTimeUtc).Skip(retainedCount))
+        foreach (var old in dailyFiles.Append(path)
+                     .OrderByDescending(file => Path.GetFileName(file), StringComparer.Ordinal).Skip(retainedCount))
             File.Delete(old);
         return path;
     }

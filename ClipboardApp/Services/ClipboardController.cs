@@ -13,10 +13,12 @@ public sealed class ClipboardController : IClipboardController
     private readonly string _defaultBackupDirectory;
     private DateOnly? _lastAutomaticBackup;
     private string? _suppressClipboardText;
+    private bool _historyErrorReported;
 
     public event EventHandler? Changed;
     public event EventHandler? SettingsChanged;
     public event EventHandler<string>? BackupFailed;
+    public event EventHandler<string>? HistoryFailed;
 
     public ClipboardController(ClipboardRepository repository, string dataDirectory)
     {
@@ -27,15 +29,20 @@ public sealed class ClipboardController : IClipboardController
     public ClipboardSettings GetSettings()
     {
         var hotkey = _repository.GetSetting("hotkey") ?? "right alt";
+        if (!GlobalHotkeyHook.IsSupportedHotkey(hotkey)) hotkey = "right alt";
         var scale = double.TryParse(_repository.GetSetting("font_scale"), System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : 1.0;
-        return new ClipboardSettings(hotkey, GetAutostart(), scale,
-            _repository.GetSetting("theme") ?? "dark", _repository.GetSetting("backup_directory") ?? _defaultBackupDirectory);
+        if (!double.IsFinite(scale) || scale is < 0.75 or > 1.75) scale = 1.0;
+        var theme = _repository.GetSetting("theme");
+        var autostart = GetAutostart();
+        return new ClipboardSettings(hotkey, autostart ?? false, scale,
+            theme is "light" ? "light" : "dark", _repository.GetSetting("backup_directory") ?? _defaultBackupDirectory,
+            AutostartReadable: autostart.HasValue);
     }
 
     public void SetHotkey(string hotkey)
     {
-        if (!RightAltHook.IsSupportedHotkey(hotkey)) throw new ArgumentException("不支援的快捷鍵", nameof(hotkey));
+        if (!GlobalHotkeyHook.IsSupportedHotkey(hotkey)) throw new ArgumentException("不支援的快捷鍵", nameof(hotkey));
         _repository.SetSetting("hotkey", hotkey);
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         NotifySaved();
@@ -45,6 +52,8 @@ public sealed class ClipboardController : IClipboardController
     {
         using var key = Registry.CurrentUser.CreateSubKey(AutostartKey, writable: true)
             ?? throw new InvalidOperationException("無法開啟 Windows 開機啟動設定");
+        var previous = key.GetValue(AutostartValue);
+        var previousKind = previous is null ? RegistryValueKind.String : key.GetValueKind(AutostartValue);
         if (enabled)
         {
             var path = Environment.ProcessPath ?? throw new InvalidOperationException("找不到程式位置");
@@ -53,12 +62,18 @@ public sealed class ClipboardController : IClipboardController
             key.SetValue(AutostartValue, $"\"{path}\"");
         }
         else key.DeleteValue(AutostartValue, throwOnMissingValue: false);
-        _repository.SetSetting("autostart", enabled ? "true" : "false");
+        try { _repository.SetSetting("autostart", enabled ? "true" : "false"); }
+        catch
+        {
+            if (previous is null) key.DeleteValue(AutostartValue, throwOnMissingValue: false);
+            else key.SetValue(AutostartValue, previous, previousKind);
+            throw;
+        }
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         NotifySaved();
     }
 
-    private bool GetAutostart()
+    private bool? GetAutostart()
     {
         try
         {
@@ -68,7 +83,7 @@ public sealed class ClipboardController : IClipboardController
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
         {
-            return _repository.GetSetting("autostart") == "true";
+            return null;
         }
     }
 
@@ -96,6 +111,7 @@ public sealed class ClipboardController : IClipboardController
         var sample = Path.Combine(path, $"daily-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.db");
         _repository.CreateBackup(sample);
         _repository.SetSetting("backup_directory", path);
+        _lastAutomaticBackup = null;
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         NotifySaved();
     }
@@ -145,6 +161,7 @@ public sealed class ClipboardController : IClipboardController
 
     public bool CopyText(string text)
     {
+        if (string.IsNullOrEmpty(text)) return false;
         for (var attempt = 0; attempt < 5; attempt++)
         {
             try
@@ -175,8 +192,15 @@ public sealed class ClipboardController : IClipboardController
             }
             _suppressClipboardText = null;
             if (_repository.AddHistory(content) is not null) NotifySaved();
+            _historyErrorReported = false;
         }
         catch (System.Runtime.InteropServices.ExternalException) { /* Clipboard can be temporarily locked by another app. */ }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or FormatException)
+        {
+            if (_historyErrorReported) return;
+            _historyErrorReported = true;
+            HistoryFailed?.Invoke(this, ex.Message);
+        }
     }
 
     public string CreateBackup()
@@ -191,6 +215,8 @@ public sealed class ClipboardController : IClipboardController
     public void RestoreBackup(string path)
     {
         _repository.RestoreBackup(path);
+        _lastAutomaticBackup = null;
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
         NotifySaved();
     }
 
@@ -201,19 +227,7 @@ public sealed class ClipboardController : IClipboardController
         if (_lastAutomaticBackup == today) return;
         try
         {
-            var directory = GetSettings().BackupDirectory;
-            if (Path.GetFullPath(directory).Equals(Path.GetFullPath(_defaultBackupDirectory), StringComparison.OrdinalIgnoreCase))
-                _repository.CreateDailyBackup();
-            else
-            {
-                Directory.CreateDirectory(directory);
-                if (!Directory.EnumerateFiles(directory, $"daily-{today:yyyyMMdd}-*.db").Any())
-                {
-                    _repository.CreateBackup(Path.Combine(directory, $"daily-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.db"));
-                    foreach (var old in Directory.EnumerateFiles(directory, "daily-*.db").OrderByDescending(File.GetCreationTimeUtc).Skip(30))
-                        File.Delete(old);
-                }
-            }
+            _repository.CreateDailyBackup(directory: GetSettings().BackupDirectory);
             _lastAutomaticBackup = today;
         }
         catch (Exception ex)

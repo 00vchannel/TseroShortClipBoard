@@ -8,7 +8,7 @@ namespace ClipboardApp;
 public partial class App : System.Windows.Application
 {
     private SingleInstanceGuard? _singleInstance;
-    private RightAltHook? _keyboard;
+    private GlobalHotkeyHook? _keyboard;
     private ClipboardWatcher? _clipboardWatcher;
     private TrayIcon? _tray;
     private MainWindow? _manager;
@@ -36,6 +36,8 @@ public partial class App : System.Windows.Application
             var controller = new ClipboardController(repository, dataDirectory);
             controller.BackupFailed += (_, error) => Dispatcher.BeginInvoke(() =>
                 UiPrompt.Notify(_manager, "備份提醒", $"自動備份未完成：{error}\n舊備份仍保留。"));
+            controller.HistoryFailed += (_, error) => Dispatcher.BeginInvoke(() =>
+                UiPrompt.Notify(_manager, "複製歷史提醒", $"這次的文字未能記錄：{error}\n請檢查資料位置或磁碟空間。既有資料仍保留。"));
             controller.SettingsChanged += (_, _) => RefreshHotkey(controller);
 
             _manager = new MainWindow(controller);
@@ -49,6 +51,10 @@ public partial class App : System.Windows.Application
             RefreshHotkey(controller);
             _manager.Show();
         }
+        catch (OperationCanceledException)
+        {
+            Shutdown();
+        }
         catch (Exception ex)
         {
             UiPrompt.Notify(null, "零零快捷剪貼板 2.0", $"新版無法啟動：{ex.Message}\n舊版資料未變更。");
@@ -56,26 +62,43 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private static ClipboardRepository PrepareRepository(string dataDirectory)
+    private static ClipboardRepository PrepareRepository(string dataDirectory, string? legacyDirectory = null)
     {
+        legacyDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "零零快捷剪貼板");
         var marker = Path.Combine(dataDirectory, "import-complete");
         var database = Path.Combine(dataDirectory, "clipboard.db");
-        if (File.Exists(marker))
+        if (File.Exists(database))
         {
             var existing = new ClipboardRepository(dataDirectory);
-            existing.Initialize();
+            existing.ValidateExisting();
+            if (!existing.IsSetupComplete() && !File.Exists(marker))
+                throw new InvalidDataException("偵測到尚未完成設定的資料庫。原資料已保留，請先檢查或從備份復原。");
             return existing;
         }
-        if (File.Exists(database))
-            throw new InvalidDataException("偵測到尚未完成匯入的新版資料庫。請先保留此資料夾並檢查，再重新匯入。");
+        if (File.Exists(marker))
+            throw new InvalidDataException("找不到原有資料庫。為避免遺失資料，程式不會建立空白庫；請先從備份復原。");
+
+        var legacyData = Path.Combine(legacyDirectory, "clipboard_data.json");
+        if (!File.Exists(legacyData))
+        {
+            var choice = UiPrompt.ChooseStartup();
+            if (choice is null) throw new OperationCanceledException("已取消首次設定。");
+            if (choice == "new")
+            {
+                var fresh = new ClipboardRepository(dataDirectory);
+                fresh.Initialize();
+                fresh.CompleteSetup();
+                return fresh;
+            }
+        }
 
         var importDirectory = Path.Combine(dataDirectory, "original-import");
         (string Data, string? Settings)? source;
-        try { source = LegacyImportSource.Acquire(importDirectory); }
+        try { source = LegacyImportSource.Acquire(importDirectory, legacyDirectory: legacyDirectory); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             if (!UiPrompt.Confirm(null, "匯入來源", $"無法讀取舊版正式資料：{ex.Message}\n要手動選擇已備份的 clipboard_data.json 嗎？", "選擇備份")) throw;
-            source = LegacyImportSource.Acquire(importDirectory, forceSelect: true);
+            source = LegacyImportSource.Acquire(importDirectory, forceSelect: true, legacyDirectory: legacyDirectory);
         }
         if (source is null) throw new OperationCanceledException("尚未選擇舊版資料，首次匯入已取消。");
         var repository = new ClipboardRepository(dataDirectory);
@@ -89,16 +112,17 @@ public partial class App : System.Windows.Application
             catch (Exception firstError)
             {
                 if (!UiPrompt.Confirm(null, "匯入失敗", $"舊版資料無法解析：{firstError.Message}\n要手動選擇另一份 clipboard_data.json 嗎？", "選擇檔案")) throw;
-                source = LegacyImportSource.Acquire(Path.Combine(dataDirectory, "original-import"), forceSelect: true);
+                source = LegacyImportSource.Acquire(Path.Combine(dataDirectory, "original-import"), forceSelect: true, legacyDirectory: legacyDirectory);
                 if (source is null) throw new OperationCanceledException("手動選檔已取消。");
                 repository.ImportLegacy(source.Value.Data, source.Value.Settings);
             }
-            File.WriteAllText(marker, DateTimeOffset.UtcNow.ToString("O"));
+            // The imported flag is committed together with the data. A separate file is unnecessary.
             return repository;
         }
         catch
         {
-            // Failed import is rolled back by ClipboardCore. Leave snapshots untouched for inspection.
+            // Only remove the empty database from this failed first setup, never a committed import.
+            if (repository.IsSetupComplete()) throw;
             foreach (var suffix in new[] { "", "-wal", "-shm" })
             {
                 var file = database + suffix;
@@ -124,7 +148,7 @@ public partial class App : System.Windows.Application
         {
             var hotkey = controller.GetSettings().Hotkey;
             if (_keyboard is not null && _activeHotkey == hotkey) return;
-            var next = new RightAltHook(hotkey,
+            var next = new GlobalHotkeyHook(hotkey,
                 () => _panel?.TogglePanel(), () => _panel?.Hide());
             var previous = _keyboard;
             _keyboard = next;
@@ -139,6 +163,7 @@ public partial class App : System.Windows.Application
 
     private void ShutdownSafely()
     {
+        if (_manager?.TryPrepareToClose() == false) return;
         _manager?.AllowClose();
         Shutdown();
     }

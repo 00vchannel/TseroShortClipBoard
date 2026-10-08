@@ -12,6 +12,7 @@ internal sealed class SingleInstanceGuard : IDisposable
     private readonly Mutex? _mutex;
     private readonly EventWaitHandle? _signal;
     private readonly CancellationTokenSource _cancellation = new();
+    private readonly Task? _listener;
 
     public bool IsPrimary { get; }
 
@@ -27,7 +28,7 @@ internal sealed class SingleInstanceGuard : IDisposable
         }
 
         _signal = new EventWaitHandle(false, EventResetMode.AutoReset, SignalName);
-        _ = Task.Run(() =>
+        _listener = Task.Run(() =>
         {
             while (!_cancellation.IsCancellationRequested)
             {
@@ -52,6 +53,7 @@ internal sealed class SingleInstanceGuard : IDisposable
     {
         _cancellation.Cancel();
         _signal?.Set();
+        _listener?.GetAwaiter().GetResult();
         _signal?.Dispose();
         if (IsPrimary) _mutex?.ReleaseMutex();
         _mutex?.Dispose();
@@ -59,7 +61,7 @@ internal sealed class SingleInstanceGuard : IDisposable
     }
 }
 
-internal sealed class RightAltHook : IDisposable
+internal sealed class GlobalHotkeyHook : IDisposable
 {
     private const int WhKeyboardLl = 13;
     private const int WmKeyDown = 0x0100;
@@ -71,7 +73,7 @@ internal sealed class RightAltHook : IDisposable
     private nint _hook;
     private bool _activationDown;
 
-    public RightAltHook(string hotkey, Action toggle, Action escape)
+    public GlobalHotkeyHook(string hotkey, Action toggle, Action escape)
     {
         _activationKey = ResolveKey(hotkey);
         _toggle = toggle;
@@ -150,7 +152,11 @@ internal sealed class ClipboardWatcher : IDisposable
         });
         _window.AddHook(OnMessage);
         if (!AddClipboardFormatListener(_window.Handle))
-            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        {
+            var error = Marshal.GetLastWin32Error();
+            _window.Dispose();
+            throw new System.ComponentModel.Win32Exception(error);
+        }
     }
 
     private nint OnMessage(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)

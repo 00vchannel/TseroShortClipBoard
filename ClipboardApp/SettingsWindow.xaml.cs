@@ -32,7 +32,7 @@ public partial class SettingsWindow : Window
         HotkeyCombo.SelectedItem = hotkeys.FirstOrDefault(c => c.Value.Equals(settings.Hotkey, StringComparison.OrdinalIgnoreCase)) ?? hotkeys[0];
         ThemeCombo.SelectedItem = ((IEnumerable<Choice>)ThemeCombo.ItemsSource).FirstOrDefault(c => c.Value.Equals(settings.Theme, StringComparison.OrdinalIgnoreCase));
         AutostartCheck.IsChecked = settings.Autostart;
-        UpdateAutostartStatus(settings.Autostart);
+        UpdateAutostartStatus(settings);
         FontScaleSlider.Value = settings.FontScale;
         FontScaleLabel.Text = $"{settings.FontScale:P0}";
         BackupPathText.Text = settings.BackupDirectory;
@@ -72,15 +72,19 @@ public partial class SettingsWindow : Window
         loading = true;
         try
         {
-            var saved = controller.GetSettings().Autostart;
-            AutostartCheck.IsChecked = saved;
+            var saved = controller.GetSettings();
+            AutostartCheck.IsChecked = saved.Autostart;
             UpdateAutostartStatus(saved);
         }
         finally { loading = false; }
     }
 
-    private void UpdateAutostartStatus(bool enabled)
-        => AutostartStatusText.Text = enabled ? "已開啟 · 下次登入 Windows 時自動啟動" : "已關閉 · 需要手動開啟程式";
+    private void UpdateAutostartStatus(ClipboardSettings settings)
+    {
+        AutostartCheck.IsEnabled = settings.AutostartReadable;
+        AutostartStatusText.Text = !settings.AutostartReadable ? "目前無法讀取 Windows 的啟動設定" :
+            settings.Autostart ? "已開啟 · 下次登入 Windows 時自動啟動" : "已關閉 · 需要手動開啟程式";
+    }
 
     private void ThemeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

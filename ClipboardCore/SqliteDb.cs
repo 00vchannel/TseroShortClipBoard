@@ -20,13 +20,17 @@ internal sealed class SqliteDb : IDisposable
             Dispose();
             throw new IOException($"無法開啟資料庫：{message}");
         }
-        if (!readOnly)
+        try
         {
             Execute("PRAGMA busy_timeout=5000");
-            Execute("PRAGMA foreign_keys=ON");
-            Execute("PRAGMA journal_mode=WAL");
-            Execute("PRAGMA synchronous=FULL");
+            if (!readOnly)
+            {
+                Execute("PRAGMA foreign_keys=ON");
+                Execute("PRAGMA journal_mode=WAL");
+                Execute("PRAGMA synchronous=FULL");
+            }
         }
+        catch { Dispose(); throw; }
     }
 
     public void Execute(string sql, params object?[] args)
@@ -51,7 +55,11 @@ internal sealed class SqliteDb : IDisposable
 
     public T? Scalar<T>(string sql, Func<RowReader, T> read, params object?[] args)
     {
-        return Query(sql, read, args).FirstOrDefault();
+        using var statement = Prepare(sql, args);
+        var result = Native.sqlite3_step(statement.Handle);
+        if (result == Done) return default;
+        if (result != Row) throw new IOException($"SQLite 讀取失敗：{Error()}");
+        return read(new RowReader(statement.Handle));
     }
 
     public void Transaction(Action action)
@@ -127,8 +135,8 @@ internal sealed class SqliteDb : IDisposable
     private string Error() => _db == IntPtr.Zero ? "無法取得錯誤資訊" : Marshal.PtrToStringUTF8(Native.sqlite3_errmsg(_db)) ?? "未知錯誤";
     private static int BindText(IntPtr statement, int index, string value)
     {
-        var bytes = Encoding.UTF8.GetBytes(value);
-        return Native.sqlite3_bind_text(statement, index, bytes, bytes.Length, new IntPtr(-1));
+        var bytes = Utf8(value);
+        return Native.sqlite3_bind_text(statement, index, bytes, bytes.Length - 1, new IntPtr(-1));
     }
     private static byte[] Utf8(string value) => Encoding.UTF8.GetBytes(value + "\0");
 

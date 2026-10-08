@@ -12,7 +12,8 @@ public sealed record CategoryView(Guid Id, string Name, int SortOrder);
 public sealed record SnippetView(Guid Id, string Title, string Emoji, string Content, Guid? CategoryId, int SortOrder, DateTimeOffset UpdatedAt);
 public sealed record HistoryView(Guid Id, string Content, DateTimeOffset CapturedAt);
 public sealed record DraftView(Guid SnippetId, string Title, string Emoji, string Content, Guid? CategoryId, DateTimeOffset UpdatedAt);
-public sealed record ClipboardSettings(string Hotkey, bool Autostart, double FontScale, string Theme, string BackupDirectory);
+public sealed record ClipboardSettings(string Hotkey, bool Autostart, double FontScale, string Theme, string BackupDirectory,
+    bool AutostartReadable = true);
 
 public interface IClipboardController
 {

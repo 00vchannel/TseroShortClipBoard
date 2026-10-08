@@ -1,3 +1,4 @@
+using System.IO;
 using ClipboardApp.Services;
 
 internal sealed class ProbeController(ClipboardSnapshot snapshot) : IClipboardController
@@ -10,9 +11,13 @@ internal sealed class ProbeController(ClipboardSnapshot snapshot) : IClipboardCo
     public List<Guid> DeletedIds { get; } = [];
     public string Theme { get; private set; } = "dark";
     public double FontScale { get; private set; } = 1;
+    public bool FailSnippetSave { get; set; }
+    public bool FailDraftSave { get; set; }
+    public bool AutostartReadable { get; set; } = true;
+    public List<DraftView> SavedDrafts { get; } = [];
 
     public ClipboardSnapshot GetSnapshot() => snapshot;
-    public ClipboardSettings GetSettings() => new("right alt", false, FontScale, Theme, "");
+    public ClipboardSettings GetSettings() => new("right alt", false, FontScale, Theme, "", AutostartReadable);
     public void ChangeTheme(string theme) { Theme = theme; SettingsChanged?.Invoke(this, EventArgs.Empty); }
     public void ChangeFontScale(double scale) { FontScale = scale; SettingsChanged?.Invoke(this, EventArgs.Empty); }
     public bool CopyText(string text) { Copied.Add(text); return true; }
@@ -23,8 +28,15 @@ internal sealed class ProbeController(ClipboardSnapshot snapshot) : IClipboardCo
     public void SetTheme(string theme) => throw new NotSupportedException();
     public void SetBackupDirectory(string path) => throw new NotSupportedException();
     public Guid SaveSnippet(Guid? id, string title, string emoji, string content, Guid? categoryId)
-    { LastSavedEmoji = emoji; return id ?? Guid.NewGuid(); }
-    public void SaveDraft(Guid id, string title, string emoji, string content, Guid? categoryId) { }
+    {
+        if (FailSnippetSave) throw new IOException("合成測試：儲存失敗");
+        LastSavedEmoji = emoji; return id ?? Guid.NewGuid();
+    }
+    public void SaveDraft(Guid id, string title, string emoji, string content, Guid? categoryId)
+    {
+        if (FailDraftSave) throw new IOException("合成測試：草稿保存失敗");
+        SavedDrafts.Add(new DraftView(id, title, emoji, content, categoryId, DateTimeOffset.UtcNow));
+    }
     public void DiscardDraft(Guid id) { }
     public void DeleteSnippets(IEnumerable<Guid> ids) => DeletedIds.AddRange(ids);
     public void RestoreSnippet(Guid id) => throw new NotSupportedException();

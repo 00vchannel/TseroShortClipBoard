@@ -44,6 +44,7 @@ static void Run()
         [new CategoryView(firstId, "工作", 0), new CategoryView(secondId, "生活", 1)],
         snippets, history, [], new Dictionary<Guid, DraftView>(), false));
     var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+    CheckFirstStartup(root, application);
     var prompt = typeof(MainWindow).Assembly.GetType("ClipboardApp.UiPrompt")
         ?? throw new Exception("找不到共用對話框");
     var makeDialog = prompt.GetMethod("MakeDialog", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
@@ -86,6 +87,70 @@ static void Run()
         controller.ChangeTheme("dark");
     }
     finally { settingsWindow.Close(); }
+    controller.AutostartReadable = false;
+    var restrictedSettings = new SettingsWindow(controller);
+    try
+    {
+        Check(!((System.Windows.Controls.CheckBox)restrictedSettings.FindName("AutostartCheck")!).IsEnabled &&
+            ((TextBlock)restrictedSettings.FindName("AutostartStatusText")!).Text.Contains("無法讀取"), "無權讀取啟動設定時顯示未知狀態");
+    }
+    finally { restrictedSettings.Close(); controller.AutostartReadable = true; }
+    controller.ChangeFontScale(1.75);
+    var largeSettings = new SettingsWindow(controller);
+    try
+    {
+        largeSettings.Show();
+        largeSettings.UpdateLayout();
+        var label = FindVisual<TextBlock>(largeSettings, text => text.Text == "開機時自動啟動")!;
+        Check(Math.Abs(label.FontSize - 24.5) < 0.1, "首次以 175% 開啟時繼承文字只縮放一次");
+        Check(largeSettings.MinWidth <= 540 && largeSettings.Content is not null, "設定視窗保留可捲動內容");
+        foreach (var theme in new[] { "dark", "light" })
+        {
+            controller.ChangeTheme(theme);
+            Render(largeSettings, Path.Combine(root, "ui-preview", $"settings-175-{theme}.png"));
+            RespondToDialog(application, "放大確認", false, () =>
+            {
+                var confirm = prompt.GetMethod("Confirm")!;
+                confirm.Invoke(null, [largeSettings, "放大確認", "放大文字後仍可取消。", "確定"]);
+            });
+        }
+    }
+    finally { largeSettings.Close(); controller.ChangeFontScale(1); controller.ChangeTheme("dark"); }
+    var failedSaveManager = new MainWindow(controller);
+    try
+    {
+        failedSaveManager.Show();
+        failedSaveManager.UpdateLayout();
+        var newButton = (Button)failedSaveManager.FindName("NewSnippetButton")!;
+        newButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var content = (TextBox)failedSaveManager.FindName("ContentBox")!;
+        content.Text = "儲存失敗後仍須保留的合成內容";
+        controller.FailSnippetSave = true;
+        RespondToDialog(application, "儲存失敗", false,
+            () => ((Button)failedSaveManager.FindName("SaveButton")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+        controller.FailSnippetSave = false;
+        Check(failedSaveManager.TryPrepareToClose() && controller.SavedDrafts.Last().Content == content.Text,
+            "正式儲存失敗後仍可保存草稿");
+        content.Text = "草稿失敗時不能離開的合成內容";
+        controller.FailDraftSave = true;
+        var switched = false;
+        RespondToDialog(application, "草稿保存失敗，請保留目前視窗並重試", false,
+            () => { switched = failedSaveManager.TryPrepareToClose(); });
+        Check(!switched && content.Text == "草稿失敗時不能離開的合成內容", "草稿失敗阻止關閉並保留編輯文字");
+        RespondToDialog(application, "草稿保存失敗，請保留目前視窗並重試", false,
+            () => ((ComboBox)failedSaveManager.FindName("ViewSelector")!).SelectedIndex = 1);
+        Check(((ComboBox)failedSaveManager.FindName("ViewSelector")!).SelectedIndex == 0 && content.Text.Contains("不能離開"),
+            "草稿失敗阻止切換檢視");
+        controller.FailDraftSave = false;
+        Check(failedSaveManager.TryPrepareToClose() && controller.SavedDrafts.Last().Content == content.Text, "恢復可寫入後能重試保存");
+    }
+    finally
+    {
+        controller.FailDraftSave = false;
+        controller.FailSnippetSave = false;
+        failedSaveManager.AllowClose();
+        failedSaveManager.Close();
+    }
     var managerUi = new MainWindow(controller);
     try
     {
@@ -126,7 +191,7 @@ static void Run()
         [snippets[0] with { Emoji = "🙂" }], [], [],
         new Dictionary<Guid, DraftView>
         {
-            [snippets[0].Id] = new(snippets[0].Id, "已建立文字的修改", "🙂", "修改內容", firstId, DateTimeOffset.UtcNow),
+            [snippets[0].Id] = new(snippets[0].Id, "已建立文字的修改", "🙂", "修改內容", null, DateTimeOffset.UtcNow),
             [newDraftId] = new(newDraftId, "新建草稿", "", "新內容", firstId, DateTimeOffset.UtcNow)
         }, false));
     var draftManager = new MainWindow(draftController);
@@ -139,6 +204,7 @@ static void Run()
         Check(draftRows.Items.Count == 2, "草稿檢視同時列出新建與既有文字修改");
         var existingDraft = draftRows.Items.Cast<SnippetView>().Single(s => s.Id == snippets[0].Id);
         draftRows.SelectedItem = existingDraft;
+        Check(((ComboBox)draftManager.FindName("EditorCategory")!).SelectedIndex == 0, "草稿改為未分類時不回到原本分類");
         var save = draftManager.FindName("SaveButton") as Button ?? throw new Exception("找不到儲存按鈕");
         save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Check(draftController.LastSavedEmoji == "🙂", "儲存既有修改時保留隱藏符號資料");
@@ -383,6 +449,81 @@ static void RaiseMouse(UIElement source, RoutedEvent routedEvent)
     {
         RoutedEvent = routedEvent
     });
+}
+
+static void CheckFirstStartup(string root, Application application)
+{
+    var testRoot = Path.Combine(root, "ClipboardApp.Smoke", ".test-output", Guid.NewGuid().ToString("N"));
+    var legacyDirectory = Path.Combine(testRoot, "legacy");
+    var startup = typeof(App).GetMethod("PrepareRepository", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+    ClipboardCore.ClipboardRepository Prepare(string path)
+    {
+        try { return (ClipboardCore.ClipboardRepository)startup.Invoke(null, [path, legacyDirectory])!; }
+        catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is not null)
+        { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw(); throw; }
+    }
+    void Choose(string label, Action start)
+    {
+        var responded = false;
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+        timer.Tick += (_, _) =>
+        {
+            var window = application.Windows.OfType<Window>().FirstOrDefault(w => w.Title == "歡迎使用零零快捷剪貼板");
+            if (window is null) return;
+            responded = true;
+            timer.Stop();
+            Render(window, Path.Combine(root, "ui-preview", "first-startup.png"));
+            var button = FindVisual<Button>(window, control => Equals(control.Content, label))!;
+            Check(button.Focusable, "首次啟動按鈕可使用鍵盤");
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        };
+        timer.Start();
+        try { start(); }
+        finally { timer.Stop(); }
+        Check(responded, "首次設定出現可選擇的操作");
+    }
+    var cancelPath = Path.Combine(testRoot, "cancelled");
+    try { Choose("取消", () => Prepare(cancelPath)); throw new Exception("取消沒有中止設定"); }
+    catch (OperationCanceledException) { }
+    Check(!File.Exists(Path.Combine(cancelPath, "clipboard.db")), "取消首次設定不建立資料庫");
+    var freshPath = Path.Combine(testRoot, "fresh");
+    ClipboardCore.ClipboardRepository? fresh = null;
+    Choose("開始使用", () => fresh = Prepare(freshPath));
+    Check(fresh!.IsSetupComplete() && fresh.ListSnippets().Count == 0, "沒有舊版資料也能直接開始");
+    var controller = new ClipboardController(fresh, freshPath);
+    Check(!controller.CopyText(""), "空文字不造成剪貼簿例外");
+    var id = controller.SaveSnippet(null, "全新文字", "", "全新用戶正文", null);
+    Check(Prepare(freshPath).GetSnippet(id)!.Content == "全新用戶正文", "全新用戶新增後重新開啟仍保留");
+    fresh.SetSetting("font_scale", "NaN");
+    fresh.SetSetting("hotkey", "不存在的快捷鍵");
+    fresh.SetSetting("theme", "未知主題");
+    var safeSettings = controller.GetSettings();
+    Check(safeSettings.FontScale == 1 && safeSettings.Hotkey == "right alt" && safeSettings.Theme == "dark", "無效舊設定採可用預設值");
+    controller.SetTheme("light");
+    controller.SetHotkey("f2");
+    var backup = controller.CreateBackup();
+    controller.SetTheme("dark");
+    controller.SetHotkey("right ctrl");
+    var changed = 0;
+    controller.SettingsChanged += (_, _) => changed++;
+    controller.RestoreBackup(backup);
+    Check(changed == 1 && controller.GetSettings().Theme == "light" && controller.GetSettings().Hotkey == "f2",
+        "還原立即通知更新主題與快捷鍵");
+    var missingPath = Path.Combine(testRoot, "missing");
+    Directory.CreateDirectory(missingPath);
+    File.WriteAllText(Path.Combine(missingPath, "import-complete"), "existing setup");
+    try { Prepare(missingPath); throw new Exception("資料庫遺失仍然啟動"); }
+    catch (InvalidDataException) { }
+    Check(!File.Exists(Path.Combine(missingPath, "clipboard.db")), "遺失資料庫時不建立空白庫");
+    Directory.CreateDirectory(legacyDirectory);
+    var legacyFile = Path.Combine(legacyDirectory, "clipboard_data.json");
+    File.WriteAllText(legacyFile, "{\"categories\":[\"All\",\"Copied\"],\"snippets\":[{\"emoji\":\"\",\"title\":\"舊文字\",\"category\":\"All\",\"content\":\"完整舊內容\"}]}");
+    var sourceBytes = File.ReadAllBytes(legacyFile);
+    var importedPath = Path.Combine(testRoot, "imported");
+    Check(Prepare(importedPath).ListSnippets().Single().Content == "完整舊內容", "存在舊資料時自動匯入全文");
+    Check(Prepare(importedPath).ListSnippets().Count == 1, "沒有外部標記檔仍可辨識完成的匯入");
+    Check(File.ReadAllBytes(legacyFile).SequenceEqual(sourceBytes), "匯入不修改舊版來源");
+    Console.WriteLine("Startup and controller checks passed using isolated synthetic data.");
 }
 
 static void InvokeMouseHandler(object target, string name, UIElement source, RoutedEvent routedEvent)

@@ -63,13 +63,19 @@ internal static class UiPreferences
             var child = VisualTreeHelper.GetChild(parent, i);
             if (child is TextBlock text)
             {
-                var baseline = Sizes.GetValue(text, e => new BaseSize(((TextBlock)e).FontSize)).Value;
-                text.FontSize = baseline * scale;
+                if (DependencyPropertyHelper.GetValueSource(text, TextBlock.FontSizeProperty).BaseValueSource != BaseValueSource.Inherited)
+                {
+                    var baseline = Sizes.GetValue(text, e => new BaseSize(((TextBlock)e).FontSize)).Value;
+                    text.FontSize = baseline * scale;
+                }
             }
             else if (child is Control control)
             {
-                var baseline = Sizes.GetValue(control, e => new BaseSize(((Control)e).FontSize)).Value;
-                control.FontSize = baseline * scale;
+                if (DependencyPropertyHelper.GetValueSource(control, Control.FontSizeProperty).BaseValueSource != BaseValueSource.Inherited)
+                {
+                    var baseline = Sizes.GetValue(control, e => new BaseSize(((Control)e).FontSize)).Value;
+                    control.FontSize = baseline * scale;
+                }
             }
             ScaleChildren(child, scale);
         }

@@ -7,9 +7,9 @@ namespace ClipboardApp.Services;
 
 internal static class LegacyImportSource
 {
-    public static (string Data, string? Settings)? Acquire(string destination, bool forceSelect = false)
+    public static (string Data, string? Settings)? Acquire(string destination, bool forceSelect = false, string? legacyDirectory = null)
     {
-        var legacyDirectory = Path.Combine(
+        legacyDirectory ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "零零快捷剪貼板");
         var data = Path.Combine(legacyDirectory, "clipboard_data.json");
@@ -17,7 +17,7 @@ internal static class LegacyImportSource
 
         if (forceSelect || !File.Exists(data))
         {
-            UiPrompt.Notify(null, "首次匯入", "找不到舊版正式資料。請選擇舊版 clipboard_data.json，或取消後保持舊版使用。");
+            UiPrompt.Notify(null, "匯入舊版文字", "請選擇舊版 clipboard_data.json 備份。取消後不會匯入或變更舊資料。");
             using var dialog = new Forms.OpenFileDialog
             {
                 Title = "選擇舊版 clipboard_data.json",
