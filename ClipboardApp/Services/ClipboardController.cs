@@ -7,6 +7,8 @@ namespace ClipboardApp.Services;
 
 public sealed class ClipboardController : IClipboardController
 {
+    private const string AutostartKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string AutostartValue = "ZeroZeroClipboardV2";
     private readonly ClipboardRepository _repository;
     private readonly string _defaultBackupDirectory;
     private DateOnly? _lastAutomaticBackup;
@@ -27,7 +29,7 @@ public sealed class ClipboardController : IClipboardController
         var hotkey = _repository.GetSetting("hotkey") ?? "right alt";
         var scale = double.TryParse(_repository.GetSetting("font_scale"), System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : 1.0;
-        return new ClipboardSettings(hotkey, _repository.GetSetting("autostart") == "true", scale,
+        return new ClipboardSettings(hotkey, GetAutostart(), scale,
             _repository.GetSetting("theme") ?? "dark", _repository.GetSetting("backup_directory") ?? _defaultBackupDirectory);
     }
 
@@ -41,20 +43,33 @@ public sealed class ClipboardController : IClipboardController
 
     public void SetAutostart(bool enabled)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true)
+        using var key = Registry.CurrentUser.CreateSubKey(AutostartKey, writable: true)
             ?? throw new InvalidOperationException("無法開啟 Windows 開機啟動設定");
-        const string valueName = "ZeroZeroClipboardV2";
         if (enabled)
         {
             var path = Environment.ProcessPath ?? throw new InvalidOperationException("找不到程式位置");
             if (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("目前不是可開機啟動的發佈版本");
-            key.SetValue(valueName, $"\"{path}\"");
+            key.SetValue(AutostartValue, $"\"{path}\"");
         }
-        else key.DeleteValue(valueName, throwOnMissingValue: false);
+        else key.DeleteValue(AutostartValue, throwOnMissingValue: false);
         _repository.SetSetting("autostart", enabled ? "true" : "false");
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         NotifySaved();
+    }
+
+    private bool GetAutostart()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(AutostartKey);
+            return Environment.ProcessPath is { } path &&
+                string.Equals(key?.GetValue(AutostartValue) as string, $"\"{path}\"", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            return _repository.GetSetting("autostart") == "true";
+        }
     }
 
     public void SetFontScale(double scale)

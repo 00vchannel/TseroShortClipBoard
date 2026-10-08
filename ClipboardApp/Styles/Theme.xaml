@@ -96,6 +96,45 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <Style x:Key="SettingsToggle" TargetType="CheckBox">
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Border x:Name="ToggleFocus" Background="Transparent" BorderBrush="Transparent"
+                            BorderThickness="2" CornerRadius="12" Padding="6">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" Margin="0,0,14,0"/>
+                            <Border x:Name="ToggleTrack" Grid.Column="1" Width="48" Height="28" CornerRadius="14"
+                                    Background="{DynamicResource RaisedBrush}" BorderBrush="{DynamicResource MutedBrush}" BorderThickness="1">
+                                <Border x:Name="ToggleThumb" Width="20" Height="20" CornerRadius="10" Margin="3"
+                                        Background="{DynamicResource TextBrush}" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="ToggleTrack" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter TargetName="ToggleTrack" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            <Setter TargetName="ToggleThumb" Property="Background" Value="#101112"/>
+                            <Setter TargetName="ToggleThumb" Property="HorizontalAlignment" Value="Right"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ToggleTrack" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="ToggleFocus" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.82"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
     <Style TargetType="Slider">
         <Setter Property="Height" Value="24"/>
         <Setter Property="Template">

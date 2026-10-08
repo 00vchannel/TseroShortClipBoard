@@ -1,302 +1,110 @@
-# 零零快捷剪貼板 v1.0.1
-
-Windows 專用快捷剪貼板管理工具。單一 exe，免安裝即可使用。
-使用 Python + CustomTkinter 開發，PyInstaller 打包。
-
-- **GitHub**: https://github.com/00vchannel/TseroShortClipBoard
-- **開發者**: Deep Frame Studio Limited
-
----
-
-## 專案結構
-
-```
-零零快捷剪貼板/
-├── app.py                 # 主程式（所有邏輯，單檔案架構）
-├── build.py               # PyInstaller 打包腳本
-├── version_info.txt       # EXE 版本資訊（防毒誤報用）
-├── requirements.txt       # Python 依賴
-├── README.md              # 本文件
-├── assets/
-│   ├── 00monstericon.png  # App 圖示 PNG（托盤、標題列）
-│   └── 00monstericon.ico  # App 圖示 ICO（EXE 圖示，含 16/32/48/64/128/256px 多尺寸）
-├── build/                 # [自動生成] PyInstaller 暫存
-└── dist/
-    └── 零零快捷剪貼板.exe  # [自動生成] 打包後的執行檔
-```
-
-### 使用者資料位置
-
-資料存放在 `%APPDATA%\零零快捷剪貼板\`（重裝 exe 後資料保留）：
-- `clipboard_data.json` — 片段 & 分類資料
-- `settings.json` — 使用者設定
-
----
-
-## 重要常數（app.py 頂部）
-
-```python
-APP_NAME = "零零快捷剪貼板"
-APP_VERSION = "1.0.1"                    # ⬅ 發佈新版時改這裡
-GITHUB_REPO = "00vchannel/TseroShortClipBoard"
-GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-COPIED_MAX = 50                          # Copied 分類最多保留筆數
-```
-
----
-
-## 功能清單
-
-### 熱鍵呼出
-- **預設**: `Right Alt`（可在設定更換，支援 18 種快捷鍵）
-- 按下後在**游標所在螢幕**中央顯示毛玻璃 overlay
-- 再按一次關閉。400ms 防抖動，按住不會重複觸發
-- 左 Alt 與右 Alt 獨立判斷，不會互相觸發
-
-### 主視窗（MainOverlay）
-- 預設 580×440，可在設定調整（7 種預設尺寸）
-- 深色 / 淺色主題切換
-- 無邊框、圓角（`DWM_WINDOW_CORNER_PREFERENCE`）、always-on-top
-- Win32 毛玻璃效果（`SetWindowCompositionAttribute`）
-- 頂部標題列：自訂圖示 + App 名稱 + **版本號** + **⬆ 更新**按鈕 + ⚙ 設定 + ✕ 關閉
-- 頂部標題列可拖曳移動（拖曳時鎖定尺寸避免閃爍）
-
-### 搜尋
-- 即時模糊搜尋（標題 + 內容），每次輸入即刻篩選
-
-### 分類系統
-- **All**：顯示所有片段（不含 Copied）— 固定第一位，不可刪除
-- **Copied**：自動記錄最近 50 筆複製內容 — 固定第二位，不可刪除
-- **自訂分類**：使用者可新增、刪除、重新命名（✎）、排序（▲▼）
-- 分類列支援**水平滾動**（滑鼠滾輪 / 觸控板），分類過多時不會消失
-- 使用者刪除的分類不會在重啟後復活（載入時只確保 All 和 Copied 存在）
-
-### 片段列表
-- `CTkScrollableFrame` 可滾動
-- 每列：彩色 Emoji（`tk.Label` + `Segoe UI Emoji` 字體）+ 標題 + 內容預覽
-- Hover 時顯示數字提示（1~0）
-- **左鍵點擊** → 複製到剪貼簿 → Toast「已複製！」→ 自動關閉
-- **右鍵點擊** → 開啟編輯視窗
-- 每列右側按鈕：**▲▼**（排序）、**Edit**（編輯）、**✕**（刪除，有確認對話框）
-- 新增的片段會出現在列表**最頂部**
-
-### 新增 / 編輯視窗（SnippetEditor）
-- Emoji 按鈕 → 64 個常用 emoji 彩色選擇器
-- 標題、分類（下拉 + 新增）、多行內容
-- 編輯模式有「刪除」按鈕
-- **重要**：編輯器用物件引用（`is` 身份比對）追蹤目標片段，不受剪貼簿監控插入新項目的影響
-
-### 設定頁面（SettingsWindow）
-- **快捷鍵**：18 種預設選項
-- **視窗尺寸**：7 種預設
-- **外觀模式**：dark / light
-- **自動啟動**：開機自動啟動（Windows Registry）
-- **分類管理**（可滾動）：每個分類可 ▲▼ 排序、✎ 重新命名、✕ 刪除
-
-### 一鍵更新
-- 頂部「⬆ 更新」按鈕 → 呼叫 GitHub Releases API 檢查最新版本
-- 有新版 → 自動下載 .exe 或 .zip（從 zip 自動解壓 exe）→ 顯示進度
-- 下載完成 → 建立 bat 腳本替換舊 exe → 重啟 app
-- 無新版 → 顯示「已是最新版本」
-- 無 Release / 404 → 顯示「已是最新版本」（不報錯）
-
-### 系統托盤
-- `pystray` 系統托盤圖示（使用自訂 `00monstericon.png`）
-- 右鍵選單：顯示 / 結束
-
-### 單實例鎖
-- 使用 Win32 Named Mutex（`Global\ZeroZeroClipboard_SingleInstance`）
-- 第二個實例啟動時自動退出
-
-### 剪貼簿監控
-- 每 1.5 秒輪詢剪貼簿（`pyperclip.paste()`）
-- 新內容自動加入 Copied 分類（最多 50 筆）
-- `_skip_next_clip` 旗標避免自身複製被重複記錄
-
----
-
-## 類別架構（app.py）
-
-| 類別 | 用途 |
-|------|------|
-| `DataManager` | 資料層：讀寫 JSON、CRUD 片段與分類、swap/rename/move 操作 |
-| `Toast` | 浮動通知（淡入 → 停留 → 淡出 → 自毀） |
-| `EmojiPicker` | 8×8 彩色 emoji 選擇器（原生 `tk.Label` + `Segoe UI Emoji`） |
-| `SnippetEditor` | 新增/編輯視窗（用 `_edit_snippet_ref` + `is` 追蹤物件） |
-| `SettingsWindow` | 設定頁面（熱鍵、尺寸、主題、自動啟動、分類管理含排序/重命名/刪除） |
-| `MainOverlay` | 主 overlay（搜尋、分類、片段列表、更新檢查、排序箭頭） |
-| `App` | 入口：熱鍵管理、托盤、剪貼簿監控、生命週期 |
-
-### Win32 API 使用
-
-| 函數 | 用途 |
-|------|------|
-| `enable_blur(hwnd)` | `SetWindowCompositionAttribute` 毛玻璃效果 |
-| `set_rounded_corners(hwnd)` | `DwmSetWindowAttribute` 圓角視窗 |
-| `get_cursor_monitor_rect()` | `GetCursorPos` + `MonitorFromPoint` + `GetMonitorInfoW` 多螢幕定位 |
-| `acquire_single_instance_lock()` | `CreateMutexW` 單實例鎖 |
-| `set_autostart()` | `winreg` 註冊表寫入開機自動啟動 |
-| `_set_overlay_icon()` | `LoadImageW` + `SendMessageW(WM_SETICON)` 設定工作列圖示 |
-
-### 資料檔案格式
-
-**clipboard_data.json**
-```json
-{
-  "snippets": [
-    {"emoji": "👋", "title": "打招呼", "category": "聊天", "content": "嗨！你好嗎？"}
-  ],
-  "categories": ["All", "Copied", "自訂", "聊天", "上班族"]
-}
-```
-
-**settings.json**
-```json
-{
-  "hotkey": "right alt",
-  "size": "580 x 440",
-  "theme": "dark",
-  "autostart": false
-}
-```
-
-### 主題系統
-
-`THEMES` 字典定義 `dark` / `light` 兩套完整配色，包含：
-- `bg`, `bar`, `card`, `card_hover`, `input_bg` — 背景色
-- `border`, `cat_bg`, `cat_active` — 邊框與分類
-- `text`, `text2`, `text3`, `text_dim` — 文字色階
-- `accent`, `green`, `red` + hover 色 — 強調色
-- `scroll_btn`, `scroll_hover` — 捲軸按鈕色
-
-切換主題時 `_build_ui()` 會銷毀所有子元件並重建。
-
----
-
-## 已知限制
-
-| 問題 | 狀態 | 說明 |
-|------|------|------|
-| D3D 獨佔全螢幕 | ⚠️ 部分支援 | `TOPMOST` 在無邊框/視窗化模式正常，D3D 獨佔模式可能無法覆蓋 |
-| JSON 損壞 | ✅ 已處理 | `load_data` try/except，損壞時重設預設值 |
-| 熱鍵註冊失敗 | ✅ 已處理 | fallback 到 `right alt` |
-| 單實例 | ✅ 已處理 | Win32 Mutex 防止重複開啟 |
-| DPI 縮放 | ✅ 已處理 | `SetProcessDpiAwareness(2)` Per-Monitor V2 |
-| 大量片段 | ⚠️ 可能慢 | 超過 ~200 片段時 `_refresh_list` 可能卡頓 |
-
----
-
-## 打包為 exe
-
-```bash
-pip install -r requirements.txt
-python build.py
-```
-
-> `build.py` 現在預設會在打包後執行 **Windows 程式碼簽章**。若未設定簽章憑證會直接失敗，避免發佈未簽章檔案。
-
-### 簽章前置設定（必要）
-
-至少提供一種憑證來源：
-
-1. PFX 憑證檔（建議）
-2. 已安裝在憑證存放區的憑證（主體名稱或 SHA1）
-
-```powershell
-# 必填（擇一）
-$env:SIGN_PFX_PATH = "C:\\certs\\codesign.pfx"
-$env:SIGN_PFX_PASSWORD = "<your-password>"
-# 或
-$env:SIGN_CERT_SHA1 = "0123456789ABCDEF0123456789ABCDEF01234567"
-# 或
-$env:SIGN_CERT_SUBJECT = "Deep Frame Studio Limited"
-
-# 選填
-$env:SIGNTOOL_PATH = "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.22621.0\\x64\\signtool.exe"
-$env:SIGN_TIMESTAMP_URL = "http://timestamp.digicert.com"
-```
-
-僅本機開發測試可用（禁止發佈）：
-
-```powershell
-python build.py --unsigned
-```
-
-`build.py` 會自動執行：
-```
-PyInstaller --onefile --windowed --noupx
-  --name "零零快捷剪貼板"
-  --icon assets/00monstericon.ico
-  --version-file version_info.txt
-  --add-data "assets;assets"
-  --hidden-import pystray PIL PIL._tkinter_finder
-  --collect-all customtkinter
-  + signtool sign / verify（SHA256 + timestamp）
-```
-
-輸出：`dist/零零快捷剪貼板.exe`
-
----
-
-## 發佈新版更新（完整步驟）
-
-### 前置需求（只需做一次）
-1. 安裝 GitHub CLI：`winget install GitHub.cli`
-2. 登入：`gh auth login --web`（瀏覽器授權）
-
-### 每次發佈流程
-
-**步驟 1：改版本號**
-打開 `app.py`，修改第 37 行：
-```python
-APP_VERSION = "1.1.0"   # 改成新版本號
-```
-
-**步驟 2：打包 exe**
-```powershell
-python build.py
-```
-
-**步驟 3：壓縮 zip**
-（GitHub 不接受中文檔名和直接上傳 exe，必須用英文檔名 zip）
-```powershell
-Compress-Archive -Path "dist\零零快捷剪貼板.exe" -DestinationPath "dist\TseroShortClipBoard_v1.1.0.zip" -Force
-```
-
-**步驟 4：發佈 Release**
-```powershell
-gh release create v1.1.0 "dist\TseroShortClipBoard_v1.1.0.zip" --repo 00vchannel/TseroShortClipBoard --title "v1.1.0" --notes "更新內容描述"
-```
-
-完成！所有使用者在 app 內點「⬆ 更新」就能一鍵下載新版。
-
-### 更新流程原理
-
-```
-使用者點「⬆ 更新」
-  → app 呼叫 GitHub API: /repos/.../releases/latest
-  → 比對 tag (v1.1.0) vs APP_VERSION (1.0.0)
-  → 不同 → 顯示「發現新版本」+ 下載按鈕
-  → 下載 .zip asset → 解壓出 .exe → 存為 .exe.new
-  → 建立 _update.bat（等 app 關閉後替換舊 exe 並重啟）
-  → 使用者點「重啟更新」→ app 關閉 → bat 執行替換 → 新版啟動
-```
-
-### 注意事項
-- GitHub Release 的 **tag 名稱**必須是 `vX.X.X` 格式（如 `v1.1.0`）
-- zip 檔案名稱**不能有中文**，否則 GitHub 會拒絕上傳
-- zip 裡面的 exe 檔名必須是 `零零快捷剪貼板.exe`
-- `version_info.txt` 裡的版本號也建議同步更新（影響 exe 檔案屬性）
-
----
-
-## 依賴
-
-| 套件 | 用途 |
-|------|------|
-| `customtkinter` | 現代化 Tkinter UI 框架 |
-| `keyboard` | 全域熱鍵監聽 |
-| `pyperclip` | 剪貼簿操作 |
-| `pystray` | 系統托盤圖示 |
-| `pillow` | 圖片處理（圖示載入） |
-| `pyinstaller` | 打包為 exe |
+# 零零快捷剪貼板
+
+Windows 常用文字與剪貼歷史管理工具。用快捷鍵叫出面板，搜尋並複製常用回覆、長文或剛複製過的文字；整理內容時，再切換到管理視窗。資料保存在本機。
+
+目前新版為 **2.0（.NET 10／WPF／SQLite）**，介面使用繁體中文。
+
+- [GitHub 儲存庫](https://github.com/00vchannel/TseroShortClipBoard)
+- [版本與下載](https://github.com/00vchannel/TseroShortClipBoard/releases)
+- [2.0 使用說明](V2-使用說明.md)
+- 開發者：Deep Frame Studio Limited
+
+> **版本狀態（2026-10-08）**：本 README 介紹目前 2.0 程式的功能。GitHub Releases 最新公開下載仍為 **v1.0.1**，其 Python 舊版介面與下列功能不同；2.0 尚未上傳至 Releases。實際可下載版本請以發佈頁為準。
+
+## 日常使用
+
+1. 啟動後會開啟管理視窗，可新增文字、設定標題與分類，按「儲存」保存。
+2. 平時按 **右 Alt** 開啟快捷面板，輸入關鍵字後，單擊結果或按 **Enter** 複製全文；面板隨即收起，再到目標程式貼上。
+3. 需要整理、編輯或備份時，按快捷面板頂部的「管理」，或從 Windows 系統匣開啟管理視窗。
+
+關閉視窗會收起畫面，程式仍留在系統匣。要完全關閉程式，請從系統匣選「結束」。重複啟動 2.0 會叫出既有管理視窗。
+
+## 主要功能
+
+### 快捷取用面板
+
+- 右 Alt 開關面板；也可在設定改用右 Ctrl 或 F1–F12。
+- 面板出現在游標所在螢幕的可用範圍中央，預設大小為 620 × 760；可手動調整，較小螢幕會自動縮小。
+- 在「常用文字」與「複製歷史」之間切換。自訂分類以可直接點選的標籤顯示，每次開啟預設選取第一個分類並清空搜尋。
+- 搜尋常用文字時會跨分類尋找，包含未分類文字；比對標題與全文，不分英文大小寫。以空白分隔多個關鍵字時，結果須同時包含所有關鍵字。
+- 單擊結果或按 Enter 複製完整內容；搜尋框內可用上、下方向鍵選取結果。按 Esc、再次按快捷鍵或切換到其他視窗時收起面板。
+- 清單只顯示固定高度的標題與內容預覽，長文截斷不影響實際複製的全文。
+
+### 管理視窗與草稿
+
+- 左側選擇檢視、分類與文字，右側查看或編輯全文。可切換「常用文字」「複製歷史」「未完成草稿」及「垃圾桶」。
+- 常用文字包含標題、分類與多行內容，可搜尋，也可用 Ctrl／Shift 多選後批次搬移或刪除。
+- 編輯中的內容會先自動保存為草稿；按「儲存」或 **Ctrl + S** 才更新正式文字。快捷面板取用的是已儲存版本。
+- 新建文字和既有文字的未完成修改都可在草稿檢視繼續編輯；放棄既有文字的草稿會保留原本已儲存的內容。
+- 常用文字列右側的垃圾桶按鈕會先確認，再將該筆移至垃圾桶。垃圾桶可復原文字；永久刪除另需確認，之後無法從垃圾桶復原。
+- 「設定與資料」集中設定、手動備份與還原；「分類」提供分類整理；「更多操作」依目前檢視提供可用操作。
+
+### 分類與拖曳排序
+
+- 自訂分類可新增、重新命名、刪除及調整順序。刪除分類會把其中的文字移至「未分類」，不會連帶刪除文字。
+- 快捷面板與管理視窗都可從列左側的六點把手拖曳常用文字。整列預覽會跟隨游標，目標列顯示亮框，放開後保存順序。
+- 排序只作用於目前分類；管理視窗也可整理未分類文字。搜尋結果、複製歷史、草稿和垃圾桶不提供拖曳排序。
+- 管理視窗可查看「所有分類」或「未分類」。快捷面板的分類標籤顯示自訂分類，未分類文字仍可透過搜尋找到。
+
+### 複製歷史
+
+- 自動記錄 Windows 剪貼簿中的文字，保留最近 **50 筆**，依最近複製時間排列。
+- 再次複製相同內容會將它移到最新位置，不重複累積；由本程式取用文字時不再新增同一筆歷史。
+- 可搜尋、暫停／繼續記錄、清空歷史，或將選取的歷史轉存為常用文字。
+- 歷史與常用文字分開保存；轉存後可在管理視窗設定標題與分類。
+
+### 外觀與 Windows 整合
+
+| 設定／行為 | 說明 |
+| --- | --- |
+| 主題 | 深色、淺色，可在設定切換。 |
+| 文字大小 | 75%–175%，兩個視窗及程式內提示一併調整。 |
+| 文字清單 | 各列維持一致高度；放大字級時一起調整，長內容不會撐高單一列。 |
+| 快捷鍵 | 預設右 Alt，可選右 Ctrl 或 F1–F12。 |
+| 開機啟動 | 在「設定與資料 → 設定」切換後立即套用；啟用時，下次登入 Windows 自動開啟目前的 2.0 執行檔。 |
+| 系統匣 | 可開啟管理視窗、快捷面板或結束程式；雙擊圖示開啟管理視窗。 |
+| 備份位置 | 可選擇本機資料夾，供手動與每日備份使用。 |
+
+## 資料與備份
+
+2.0 的預設資料目錄為 `%APPDATA%\零零快捷剪貼板 2.0\`，與舊版資料分開。
+
+| 項目 | 用途 |
+| --- | --- |
+| `clipboard.db` | 保存常用文字、分類、複製歷史、草稿、垃圾桶及程式設定的 SQLite 資料庫。 |
+| `original-import/` | 首次匯入時保留的舊版 JSON 與設定快照。 |
+| `backups/` | 預設備份目錄，包含每日備份、手動備份及還原前安全備份。 |
+
+- 每天首次成功變更資料後建立一致性備份；每日備份保留最近 **30 份**。手動備份、首次匯入快照和還原前安全備份不參與每日輪替。
+- 「設定與資料 → 手動備份」可建立資料庫備份；「還原備份」可選擇 `.db` 或 `.sqlite` 備份。
+- 還原會取代目前資料，操作前要求確認、檢查備份，並先保存目前資料的安全備份。
+- 資料與備份都留在本機，沒有雲端同步。備份含完整文字與歷史，請自行保管；重要備份可另存至其他磁碟。
+
+## 從舊版升級
+
+2.0 目前以匯入舊版資料作為首次啟動流程：
+
+1. 先從舊版系統匣正常結束程式。若舊版仍在執行，2.0 會提示並停止啟動。
+2. 首次開啟 2.0 時，會讀取 `%APPDATA%\零零快捷剪貼板\` 中的舊版資料，先建立並核對快照，再匯入獨立的新資料庫。
+3. 找不到或無法讀取來源時，可選擇已備份的 `clipboard_data.json`。匯入未成功前，程式不會開始記錄新的剪貼歷史，也不會把損壞資料當成空白資料繼續使用。
+
+匯入會保留常用文字的內容、分類與順序；舊版 `Copied` 轉為獨立複製歷史，`All` 中的文字轉為未分類。舊版標題符號保留於資料中，2.0 介面不再顯示或提供符號選擇器。舊資料與執行檔不會被匯入流程覆蓋。
+
+## 版本與使用範圍
+
+- 支援 Windows 桌面，處理文字內容；目前不提供圖片、檔案剪貼歷史或跨裝置同步。
+- 首次使用 2.0 需要可讀取的舊版 JSON 資料或備份，目前沒有直接建立全新空白資料的啟動入口。
+- 2.0 目前採手動更新執行檔，沒有舊版的程式內一鍵更新。替換前請正常結束程式，保留原執行檔並建立資料庫備份。
+- 回退到舊版前，先備份並結束 2.0；舊版不會自動讀取 2.0 新增的內容。
+- 目前的 2.0 交付執行檔尚未簽章；Windows 可能顯示來源提示。
+
+## 專案現況與內容導覽
+
+目前的功能與介面以 **2.0 的 C#／WPF 程式及 SQLite 資料庫**為準。儲存庫保留的 `app.py`、`build.py`、Python 依賴與舊 JSON 格式屬於 1.x 相容與歷史內容；它們不是目前新版的功能入口。舊版的單一視窗、符號選擇、預設尺寸清單與一鍵更新描述，不適用於 2.0。
+
+| 內容 | 說明 |
+| --- | --- |
+| [ClipboardApp/](ClipboardApp/) | 2.0 的快捷面板、管理視窗、設定與 Windows 整合。 |
+| [ClipboardCore/](ClipboardCore/) | 本機資料、草稿、歷史、垃圾桶、舊版匯入與備份還原。 |
+| [V2-使用說明.md](V2-使用說明.md) | 2.0 操作與升級說明。 |
+| [AGENTS.md](AGENTS.md) | 專案介面與資料保護規則，供後續 AI 協作參照。 |
