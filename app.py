@@ -35,7 +35,7 @@ def acquire_single_instance_lock():
 
 APP_NAME = "零零快捷剪貼板"
 APP_VERSION = "1.0.1"
-GITHUB_REPO = "morrisxlee/TseroShortClipBoard"
+GITHUB_REPO = "00vchannel/TseroShortClipBoard"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 # (#2) 資料存放在 %APPDATA% — 重裝軟體後資料仍然保留

@@ -3,7 +3,7 @@
 Windows 專用快捷剪貼板管理工具。單一 exe，免安裝即可使用。
 使用 Python + CustomTkinter 開發，PyInstaller 打包。
 
-- **GitHub**: https://github.com/morrisxlee/TseroShortClipBoard
+- **GitHub**: https://github.com/00vchannel/TseroShortClipBoard
 - **開發者**: Deep Frame Studio Limited
 
 ---
@@ -38,7 +38,7 @@ Windows 專用快捷剪貼板管理工具。單一 exe，免安裝即可使用�
 ```python
 APP_NAME = "零零快捷剪貼板"
 APP_VERSION = "1.0.1"                    # ⬅ 發佈新版時改這裡
-GITHUB_REPO = "morrisxlee/TseroShortClipBoard"
+GITHUB_REPO = "00vchannel/TseroShortClipBoard"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 COPIED_MAX = 50                          # Copied 分類最多保留筆數
 ```
@@ -265,7 +265,7 @@ Compress-Archive -Path "dist\零零快捷剪貼板.exe" -DestinationPath "dist\T
 
 **步驟 4：發佈 Release**
 ```powershell
-gh release create v1.1.0 "dist\TseroShortClipBoard_v1.1.0.zip" --repo morrisxlee/TseroShortClipBoard --title "v1.1.0" --notes "更新內容描述"
+gh release create v1.1.0 "dist\TseroShortClipBoard_v1.1.0.zip" --repo 00vchannel/TseroShortClipBoard --title "v1.1.0" --notes "更新內容描述"
 ```
 
 完成！所有使用者在 app 內點「⬆ 更新」就能一鍵下載新版。
