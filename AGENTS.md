@@ -4,7 +4,7 @@
 
 1. 下載 [v2.1.5 免安裝 ZIP](https://github.com/00vchannel/TseroShortClipBoard/releases/download/v2.1.5/ZeroZeroClipboard-win-x64-Portable.zip) 與 [SHA256SUMS.txt](https://github.com/00vchannel/TseroShortClipBoard/releases/download/v2.1.5/SHA256SUMS.txt)。
 2. 計算 ZIP 的 SHA256，與校驗檔核對；不符就停止。
-3. 完整解壓到用戶電腦上的固定資料夾，保留全部檔案。
+3. 下載及校驗完成後，由 AI 自動完整解壓到用戶電腦上的固定資料夾，保留全部檔案；只要求下載時也包含解壓，不要停在下載 ZIP，也不要要求用戶自行解壓。目的資料夾若已有程式或資料，使用新的資料夾，避免覆蓋。
 4. 按用戶要求啟動最外層「零零快捷剪貼板.exe」，確認版本；只要求下載時不啟動。
 5. 回報檔案位置與實際完成結果。
 

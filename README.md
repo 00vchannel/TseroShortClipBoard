@@ -1,16 +1,16 @@
 # 零零快捷剪貼板
 
+[![下載 Windows 版](assets/download-windows.svg)](https://github.com/00vchannel/TseroShortClipBoard/releases/download/v2.1.5/ZeroZeroClipboard-win-x64-Portable.zip)
+
 ![零零快捷剪貼板快捷面板預覽](assets/readme-preview.png)
 
 把常用的回覆、範本或 AI 提示語存起來，需要時點一下就能複製，不用每次重新打字。
 
 適用於 **Windows 64 位元電腦**，介面為繁體中文，不需要註冊帳號。
 
-**[點這裡下載 v2.1.5](https://github.com/00vchannel/TseroShortClipBoard/releases/download/v2.1.5/ZeroZeroClipboard-win-x64-Portable.zip)**
-
 ## 第一次使用
 
-1. 點上方下載連結。下載完成後，對下載的 ZIP 檔按滑鼠右鍵，選「全部解壓縮」。
+1. 點上方「下載 Windows 版」按鈕。下載完成後，對下載的 ZIP 檔按滑鼠右鍵，選「全部解壓縮」。
 2. 開啟解壓縮後的資料夾，雙擊「零零快捷剪貼板.exe」。請保留整個資料夾，不要只把這個檔案移走。
 3. 第一次開啟時，點「開始使用」。文字列表是空白的，這是正常情況。
 

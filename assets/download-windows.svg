@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="260" height="56" viewBox="0 0 260 56" role="img" aria-label="下載 Windows 版">
+  <rect width="260" height="56" rx="12" fill="#caff28"/>
+  <path d="M29 17v17m-6-6 6 6 6-6M20 37v3h18v-3" fill="none" stroke="#101410" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="54" y="35" fill="#101410" font-family="Microsoft JhengHei, Noto Sans TC, sans-serif" font-size="20" font-weight="700">下載 Windows 版</text>
+</svg>
