@@ -4,9 +4,7 @@
 
 適用於 **Windows 64 位元（x64）**，介面是繁體中文。文字和備份都存在自己的電腦，沒有雲端同步。
 
-[目前公開下載 v2.0.0](https://github.com/00vchannel/TseroShortClipBoard/releases/tag/v2.0.0) · [使用說明](V2-使用說明.md)
-
-> v2.1.4 原始碼與標籤已推送，下載套件正在等待發布帳號權限處理，目前尚未公開。以下介紹 v2.1.4 功能；公開的 2.0 不包含官方提示語與一鍵更新。
+[下載 v2.1.4](https://github.com/00vchannel/TseroShortClipBoard/releases/download/v2.1.4/ZeroZeroClipboard-win-x64-Portable.zip) · [版本說明](https://github.com/00vchannel/TseroShortClipBoard/releases/tag/v2.1.4) · [使用說明](V2-使用說明.md)
 
 > **2.0 用戶首次升級需手動下載。**先備份並從舊版系統匣選「結束」，再解壓新版到新的固定資料夾，保留舊程式。新版沿用既有 2.0 資料。請保留整個免安裝資料夾，之後即可使用程式內的「更新並重啟」。
 
