@@ -1,6 +1,14 @@
 # AI 下載任務
 
-用戶要求下載或安裝時，依 [README.md 的 AI 自動下載流程](README.md#ai-自動下載流程) 執行。
+用戶要求下載或安裝時，具備本機操作能力的 AI 請直接完成以下步驟，不要求用戶另貼提示語或自行執行指令。
+
+1. 下載 [v2.1.4 免安裝 ZIP](https://github.com/00vchannel/TseroShortClipBoard/releases/download/v2.1.4/ZeroZeroClipboard-win-x64-Portable.zip) 與 [SHA256SUMS.txt](https://github.com/00vchannel/TseroShortClipBoard/releases/download/v2.1.4/SHA256SUMS.txt)。
+2. 計算 ZIP 的 SHA256，與校驗檔核對；不符就停止。
+3. 完整解壓到用戶電腦上的固定資料夾，保留全部檔案。
+4. 按用戶要求啟動最外層「零零快捷剪貼板.exe」，確認版本；只要求下載時不啟動。
+5. 回報檔案位置與實際完成結果。
+
+保留既有程式及個人資料，不覆蓋或刪除；若舊版正在執行，啟動新版前先讓舊版保存並正常結束。
 
 # 專案介面規則
 
