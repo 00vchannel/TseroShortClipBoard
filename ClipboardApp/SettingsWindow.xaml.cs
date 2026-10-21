@@ -20,8 +20,8 @@ public partial class SettingsWindow : Window
         loading = true;
         var hotkeys = new List<Choice>
         {
-            new("right alt", "右 Alt"),
-            new("right ctrl", "右 Ctrl")
+            new("right ctrl", "右 Ctrl"),
+            new("right alt", "右 Alt")
         };
         hotkeys.AddRange(Enumerable.Range(1, 12).Select(i => new Choice($"f{i}", $"F{i}")));
         HotkeyCombo.ItemsSource = hotkeys;

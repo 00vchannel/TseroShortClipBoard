@@ -16,7 +16,7 @@ internal static class PromptSmoke
         {
             foreach (var theme in new[] { "dark", "light" })
             {
-                UiPreferences.Apply(manager, new ClipboardSettings("right alt", false, 1.75, theme, ""));
+                UiPreferences.Apply(manager, new ClipboardSettings("right ctrl", false, 1.75, theme, ""));
                 NotifyAndDismiss(manager, expectsOwner: false, theme, "主視窗尚未顯示");
             }
             controller.ChangeTheme("light");

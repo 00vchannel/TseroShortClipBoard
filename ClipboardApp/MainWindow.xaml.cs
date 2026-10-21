@@ -878,7 +878,7 @@ internal static class UiPrompt
         dialog.Loaded += (_, _) =>
         {
             var light = owner?.TryFindResource("PageBrush") is SolidColorBrush brush && brush.Color.R > 128;
-            UiPreferences.Apply(dialog, new ClipboardSettings("right alt", false, (owner?.FontSize ?? 14) / 14,
+            UiPreferences.Apply(dialog, new ClipboardSettings("right ctrl", false, (owner?.FontSize ?? 14) / 14,
                 light ? "light" : "dark", ""));
         };
         return dialog;

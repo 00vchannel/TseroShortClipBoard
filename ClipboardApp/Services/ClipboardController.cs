@@ -28,8 +28,8 @@ public sealed class ClipboardController : IClipboardController
 
     public ClipboardSettings GetSettings()
     {
-        var hotkey = _repository.GetSetting("hotkey") ?? "right alt";
-        if (!GlobalHotkeyHook.IsSupportedHotkey(hotkey)) hotkey = "right alt";
+        var hotkey = _repository.GetSetting("hotkey") ?? "right ctrl";
+        if (!GlobalHotkeyHook.IsSupportedHotkey(hotkey)) hotkey = "right ctrl";
         var scale = double.TryParse(_repository.GetSetting("font_scale"), System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : 1.0;
         if (!double.IsFinite(scale) || scale is < 0.75 or > 1.75) scale = 1.0;

@@ -28,7 +28,7 @@
                     <StackPanel>
                         <TextBlock Text="呼出快捷鍵" FontWeight="SemiBold" Margin="0,0,0,7"/>
                         <ComboBox x:Name="HotkeyCombo" Height="39" SelectionChanged="HotkeyCombo_SelectionChanged"/>
-                        <TextBlock Text="右 Alt 為預設。若與其他程式衝突，可改用功能鍵。" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        <TextBlock Text="右 Ctrl 為預設。若與其他程式衝突，可改用其他快捷鍵。" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
                 <Border Background="{DynamicResource CardBrush}" CornerRadius="18" Padding="18" Margin="0,0,0,12">

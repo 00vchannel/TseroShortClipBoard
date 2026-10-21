@@ -18,7 +18,7 @@ internal sealed class ProbeController(ClipboardSnapshot snapshot) : IClipboardCo
     public List<DraftView> SavedDrafts { get; } = [];
 
     public ClipboardSnapshot GetSnapshot() => snapshot;
-    public ClipboardSettings GetSettings() => new("right alt", false, FontScale, Theme, "", AutostartReadable);
+    public ClipboardSettings GetSettings() => new("right ctrl", false, FontScale, Theme, "", AutostartReadable);
     public void ChangeTheme(string theme) { Theme = theme; SettingsChanged?.Invoke(this, EventArgs.Empty); }
     public void ChangeFontScale(double scale) { FontScale = scale; SettingsChanged?.Invoke(this, EventArgs.Empty); }
     public bool CopyText(string text) { if (FailCopy) return false; Copied.Add(text); return true; }

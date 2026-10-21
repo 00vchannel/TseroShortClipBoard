@@ -507,6 +507,15 @@ static void CheckFirstStartup(string root, Application application)
     Choose("開始使用", () => fresh = Prepare(freshPath));
     Check(fresh!.IsSetupComplete() && fresh.ListSnippets().Count == 0, "沒有舊版資料也能直接開始");
     var controller = new ClipboardController(fresh, freshPath);
+    Check(controller.GetSettings().Hotkey == "right ctrl", "全新用戶預設使用右 Ctrl");
+    var freshSettingsWindow = new SettingsWindow(controller);
+    var hotkeyCombo = (ComboBox)freshSettingsWindow.FindName("HotkeyCombo");
+    Check(hotkeyCombo.SelectedItem?.GetType().GetProperty("Value")?.GetValue(hotkeyCombo.SelectedItem) as string == "right ctrl",
+        "設定視窗預設選取右 Ctrl");
+    freshSettingsWindow.Close();
+    controller.SetHotkey("right alt");
+    Check(new ClipboardController(Prepare(freshPath), freshPath).GetSettings().Hotkey == "right alt",
+        "重新開啟仍保留使用者選擇的右 Alt");
     Check(!controller.CopyText(""), "空文字不造成剪貼簿例外");
     var id = controller.SaveSnippet(null, "全新文字", "", "全新用戶正文", null);
     Check(Prepare(freshPath).GetSnippet(id)!.Content == "全新用戶正文", "全新用戶新增後重新開啟仍保留");
@@ -514,7 +523,7 @@ static void CheckFirstStartup(string root, Application application)
     fresh.SetSetting("hotkey", "不存在的快捷鍵");
     fresh.SetSetting("theme", "未知主題");
     var safeSettings = controller.GetSettings();
-    Check(safeSettings.FontScale == 1 && safeSettings.Hotkey == "right alt" && safeSettings.Theme == "dark", "無效舊設定採可用預設值");
+    Check(safeSettings.FontScale == 1 && safeSettings.Hotkey == "right ctrl" && safeSettings.Theme == "dark", "無效舊設定採可用預設值");
     controller.SetTheme("light");
     controller.SetHotkey("f2");
     var backup = controller.CreateBackup();
