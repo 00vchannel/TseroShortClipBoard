@@ -27,6 +27,37 @@
     <Style TargetType="TextBlock">
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
     </Style>
+    <Style TargetType="ProgressBar">
+        <Setter Property="Background" Value="{DynamicResource RaisedBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ProgressBar">
+                    <Grid ClipToBounds="True">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="2"/>
+                        <Border x:Name="PART_Track"/>
+                        <Border x:Name="PART_Indicator" HorizontalAlignment="Left" Background="{TemplateBinding Foreground}" CornerRadius="2"/>
+                        <Border x:Name="Marquee" Visibility="Collapsed" Width="60" HorizontalAlignment="Left"
+                                Background="{TemplateBinding Foreground}" CornerRadius="2">
+                            <Border.RenderTransform><TranslateTransform X="-60"/></Border.RenderTransform>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsIndeterminate" Value="True">
+                            <Setter TargetName="PART_Indicator" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="Marquee" Property="Visibility" Value="Visible"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard x:Name="MarqueeAnimation"><Storyboard RepeatBehavior="Forever">
+                                    <DoubleAnimation Storyboard.TargetName="Marquee" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" From="-60" To="620" Duration="0:0:1.4"/>
+                                </Storyboard></BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions><RemoveStoryboard BeginStoryboardName="MarqueeAnimation"/></Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
     <Style TargetType="Button">
         <Setter Property="Background" Value="{DynamicResource RaisedBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>

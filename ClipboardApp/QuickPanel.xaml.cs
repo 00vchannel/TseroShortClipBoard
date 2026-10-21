@@ -10,6 +10,7 @@ using Forms = System.Windows.Forms;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 using Point = System.Windows.Point;
+using ClipboardCore;
 
 namespace ClipboardApp;
 
@@ -35,20 +36,29 @@ public partial class QuickPanel : Window
     private double preferredWidth = 620;
     private double preferredHeight = 760;
     private bool recordingManualSize;
+    private readonly IAppUpdateService? updates;
+    public bool IsBusyForUpdate => composing || dragActive;
 
     public event EventHandler? ManagerRequested;
 
-    public QuickPanel(IClipboardController controller)
+    public QuickPanel(IClipboardController controller) : this(controller, null) { }
+
+    public QuickPanel(IClipboardController controller, IAppUpdateService? updates)
     {
+        this.updates = updates;
         this.controller = controller;
         snapshot = controller.GetSnapshot();
         InitializeComponent();
+        if (updates is not null) updates.Changed += Updates_Changed;
+        RenderUpdate();
         controller.Changed += Controller_Changed;
         controller.SettingsChanged += Controller_SettingsChanged;
         Loaded += (_, _) => UiPreferences.Apply(this, controller.GetSettings());
         TextCompositionManager.AddPreviewTextInputStartHandler(SearchBox, (_, _) => composing = true);
         TextCompositionManager.AddPreviewTextInputUpdateHandler(SearchBox, (_, _) => composing = true);
-        TextCompositionManager.AddTextInputHandler(SearchBox, (_, _) => composing = false);
+        SearchBox.AddHandler(TextCompositionManager.TextInputEvent,
+            new TextCompositionEventHandler((_, _) => composing = false), handledEventsToo: true);
+        SearchBox.LostKeyboardFocus += (_, _) => composing = false;
         SizeChanged += (_, _) =>
         {
             if (!recordingManualSize) return;
@@ -81,6 +91,61 @@ public partial class QuickPanel : Window
     }
 
     public void AllowClose() => allowClose = true;
+
+    public PanelResumeState CaptureResumeState() => new(SearchBox.Text, selectedCategory?.Id, showingHistory,
+        (ResultList.SelectedItem as ResultItem)?.Id);
+
+    public void ShowAfterUpdate(PanelResumeState state)
+    {
+        ShowPanel();
+        showingHistory = state.History;
+        SnippetsTab.Style = (Style)FindResource(state.History ? typeof(System.Windows.Controls.Button) : "AccentButton");
+        HistoryTab.Style = (Style)FindResource(state.History ? "AccentButton" : typeof(System.Windows.Controls.Button));
+        selectedCategory = CategoryChoices().FirstOrDefault(c => c.Id == state.CategoryId) ?? selectedCategory;
+        SearchBox.Text = state.Search;
+        RefreshSnapshot();
+        if (state.SelectedId is { } selected)
+            ResultList.SelectedItem = ResultList.Items.Cast<ResultItem>().FirstOrDefault(item => item.Id == selected);
+        SearchBox.Focus();
+    }
+
+    private void PanelHeader_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (PanelTitle is null || HeaderActions is null) return;
+        var wrap = PanelHeader.ActualWidth < PanelTitle.ActualWidth + HeaderActions.DesiredSize.Width + 16;
+        Grid.SetRow(HeaderActions, wrap ? 1 : 0);
+        HeaderActions.Margin = new Thickness(0, wrap ? 8 : 0, 0, 0);
+    }
+
+    private void Updates_Changed(object? sender, EventArgs e) => RenderUpdate();
+
+    private void RenderUpdate()
+    {
+        var state = updates?.State ?? new(AppUpdatePhase.Unknown);
+        var active = state.Phase is AppUpdatePhase.Downloading or AppUpdatePhase.Preparing;
+        UpdateButton.Visibility = state.Phase is AppUpdatePhase.Unknown or AppUpdatePhase.Current ? Visibility.Collapsed : Visibility.Visible;
+        UpdateButton.IsEnabled = !active;
+        UpdateButton.ToolTip = $"更新至 {state.Version}；下載完成後會自動保存草稿並重啟。";
+        UpdateProgressArea.Visibility = active || state.Phase == AppUpdatePhase.Failed ? Visibility.Visible : Visibility.Collapsed;
+        UpdateProgress.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        UpdateProgress.IsIndeterminate = state.Percent is null || state.Phase == AppUpdatePhase.Preparing;
+        UpdateProgress.Value = state.Percent ?? 0;
+        CancelUpdateButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        RetryUpdateButton.Visibility = state.Phase == AppUpdatePhase.Failed ? Visibility.Visible : Visibility.Collapsed;
+        UpdateStatus.Text = state.Phase switch
+        {
+            AppUpdatePhase.Downloading => state.Percent is { } percent ? $"下載中 {percent}% · 完成後自動重啟" : "下載中 · 完成後自動重啟",
+            AppUpdatePhase.Preparing => "正在準備重啟…",
+            AppUpdatePhase.Failed => state.Error,
+            _ => ""
+        };
+    }
+
+    private async void Update_Click(object sender, RoutedEventArgs e)
+    {
+        if (updates is not null) await updates.DownloadAsync();
+    }
+    private void CancelUpdate_Click(object sender, RoutedEventArgs e) => updates?.Cancel();
 
     private void PositionOnCursorScreen()
     {
@@ -138,12 +203,13 @@ public partial class QuickPanel : Window
         {
             snapshot = controller.GetSnapshot();
             isLoading = true;
-            var choices = snapshot.Categories.OrderBy(c => c.SortOrder).Select(c => new FilterChoice(c.Id, c.Name)).ToList();
+            var choices = CategoryChoices();
+            var defaultCategory = choices.FirstOrDefault(c => c.Id != OfficialPrompts.CategoryId);
             selectedCategory = !resetCategory && selectedCategory is not null
-                ? choices.FirstOrDefault(c => c.Id == selectedCategory.Id) ?? choices.FirstOrDefault()
-                : choices.FirstOrDefault();
+                ? choices.FirstOrDefault(c => c.Id == selectedCategory.Id) ?? defaultCategory
+                : defaultCategory;
             RenderCategoryChips(choices);
-            CategoryScroller.Visibility = showingHistory || choices.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            CategoryArea.Visibility = showingHistory ? Visibility.Collapsed : Visibility.Visible;
             isLoading = false;
             RefreshResults();
         }
@@ -154,12 +220,36 @@ public partial class QuickPanel : Window
         }
     }
 
+    private List<FilterChoice> CategoryChoices() => snapshot.Categories.OrderBy(c => c.SortOrder)
+        .Select(c => new FilterChoice(c.Id, c.Name))
+        .Append(new FilterChoice(OfficialPrompts.CategoryId, OfficialPrompts.CategoryName)).ToList();
+
+    private void OfficialCategory_Click(object sender, RoutedEventArgs e) =>
+        SelectCategory(new FilterChoice(OfficialPrompts.CategoryId, OfficialPrompts.CategoryName));
+
+    private void SelectCategory(FilterChoice choice)
+    {
+        CancelDrag();
+        selectedCategory = choice;
+        UpdateCategoryStyles();
+        RefreshResults();
+        SearchBox.Focus();
+    }
+
+    private void UpdateCategoryStyles()
+    {
+        foreach (System.Windows.Controls.Button button in CategoryChips.Children)
+            button.Style = (Style)FindResource(Equals(button.Tag, selectedCategory) ? "AccentButton" : typeof(System.Windows.Controls.Button));
+        OfficialCategoryButton.Style = (Style)FindResource(selectedCategory?.Id == OfficialPrompts.CategoryId
+            ? "AccentButton" : typeof(System.Windows.Controls.Button));
+    }
+
     private void RenderCategoryChips(IReadOnlyList<FilterChoice> choices)
     {
         CategoryChips.Children.Clear();
         var normalStyle = (Style)FindResource(typeof(System.Windows.Controls.Button));
         var activeStyle = (Style)FindResource("AccentButton");
-        foreach (var choice in choices)
+        foreach (var choice in choices.Where(c => c.Id != OfficialPrompts.CategoryId))
         {
             var chip = new System.Windows.Controls.Button
             {
@@ -169,16 +259,10 @@ public partial class QuickPanel : Window
                 Padding = new Thickness(11, 7, 11, 7),
                 Style = choice == selectedCategory ? activeStyle : normalStyle
             };
-            chip.Click += (_, _) =>
-            {
-                selectedCategory = choice;
-                foreach (System.Windows.Controls.Button button in CategoryChips.Children)
-                    button.Style = Equals(button.Tag, selectedCategory) ? activeStyle : normalStyle;
-                RefreshResults();
-                SearchBox.Focus();
-            };
+            chip.Click += (_, _) => SelectCategory(choice);
             CategoryChips.Children.Add(chip);
         }
+        UpdateCategoryStyles();
     }
 
     private void RefreshResults()
@@ -188,12 +272,13 @@ public partial class QuickPanel : Window
         bool Match(string text) => terms.All(t => text.Contains(t, StringComparison.OrdinalIgnoreCase));
         var category = selectedCategory;
         var searching = !string.IsNullOrWhiteSpace(SearchBox.Text);
-        var canReorder = !showingHistory && !searching;
+        var official = category?.Id == OfficialPrompts.CategoryId;
+        var canReorder = !showingHistory && !searching && !official;
         var results = showingHistory
             ? snapshot.History.OrderByDescending(h => h.CapturedAt)
                 .Where(h => Match(h.Content))
                 .Select(h => new ResultItem(h.Id, h.CapturedAt.ToLocalTime().ToString("yyyy/MM/dd HH:mm"), h.Content, h.Content, false, false)).ToList()
-            : snapshot.Snippets.OrderBy(s => s.SortOrder)
+            : (official ? OfficialPrompts.Items : snapshot.Snippets).OrderBy(s => s.SortOrder)
                 .Where(s => searching || category is null || s.CategoryId == category.Id)
                 .Where(s => Match(s.Title + " " + s.Content))
                 .Select(s => new ResultItem(s.Id, s.Title, s.Content, s.Content, true,
@@ -215,7 +300,7 @@ public partial class QuickPanel : Window
         showingHistory = false;
         SnippetsTab.Style = (Style)FindResource("AccentButton");
         HistoryTab.Style = (Style)FindResource(typeof(System.Windows.Controls.Button));
-        CategoryScroller.Visibility = selectedCategory is null ? Visibility.Collapsed : Visibility.Visible;
+        CategoryArea.Visibility = Visibility.Visible;
         RefreshResults();
     }
 
@@ -224,7 +309,7 @@ public partial class QuickPanel : Window
         showingHistory = true;
         HistoryTab.Style = (Style)FindResource("AccentButton");
         SnippetsTab.Style = (Style)FindResource(typeof(System.Windows.Controls.Button));
-        CategoryScroller.Visibility = Visibility.Collapsed;
+        CategoryArea.Visibility = Visibility.Collapsed;
         RefreshResults();
     }
 
@@ -343,6 +428,7 @@ public partial class QuickPanel : Window
 
     private void ReorderDroppedSnippet(Guid sourceId, ResultItem target)
     {
+        if (OfficialPrompts.IsOfficial(selectedCategory?.Id) || OfficialPrompts.IsOfficial(sourceId) || OfficialPrompts.IsOfficial(target.Id)) return;
         if (showingHistory || !string.IsNullOrWhiteSpace(SearchBox.Text) ||
             !target.IsSnippet || !target.CanReorder || sourceId == target.Id) return;
         var categoryId = selectedCategory?.Id;
@@ -378,6 +464,7 @@ public partial class QuickPanel : Window
         if (e.Key == Key.Escape) { CancelDrag(); Hide(); e.Handled = true; return; }
         if (e.Key == Key.Enter)
         {
+            if (Keyboard.FocusedElement is DependencyObject focused && FindAncestor<System.Windows.Controls.Button>(focused) is not null) return;
             if (composing) return;
             CopySelected();
             e.Handled = true;
@@ -400,6 +487,7 @@ public partial class QuickPanel : Window
         else
         {
             controller.Changed -= Controller_Changed;
+            if (updates is not null) updates.Changed -= Updates_Changed;
             controller.SettingsChanged -= Controller_SettingsChanged;
         }
     }

@@ -2,6 +2,8 @@ using System.Windows;
 using System.IO;
 using ClipboardApp.Services;
 using ClipboardCore;
+using System.Windows.Input;
+using Velopack;
 
 namespace ClipboardApp;
 
@@ -14,6 +16,10 @@ public partial class App : System.Windows.Application
     private MainWindow? _manager;
     private QuickPanel? _panel;
     private string? _activeHotkey;
+    private AppUpdateService? _updates;
+    private UpdateJournal? _updateJournal;
+    private bool _updateFrozen;
+    private bool _shuttingDown;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -31,9 +37,16 @@ public partial class App : System.Windows.Application
 
         try
         {
-            var dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "零零快捷剪貼板 2.0");
+            var dataDirectory = Program.DataDirectory;
+            if (File.Exists(Path.Combine(dataDirectory, "updates", "active.json")) &&
+                !File.Exists(Path.Combine(dataDirectory, "clipboard.db")))
+                throw new InvalidDataException("更新後找不到原有資料庫，已停止啟動，請保留 updates 資料夾中的備份並先復原資料。");
             var repository = PrepareRepository(dataDirectory);
+            var resume = UpdatePreparation.VerifyPending(repository, dataDirectory);
             var controller = new ClipboardController(repository, dataDirectory);
+#if !UPDATE_TEST_BUILD
+            controller.MigrateAutostartEntry();
+#endif
             controller.BackupFailed += (_, error) => Dispatcher.BeginInvoke(() =>
                 UiPrompt.Notify(_manager, "備份提醒", $"自動備份未完成：{error}\n舊備份仍保留。"));
             controller.HistoryFailed += (_, error) => Dispatcher.BeginInvoke(() =>
@@ -41,15 +54,25 @@ public partial class App : System.Windows.Application
             controller.SettingsChanged += (_, _) => RefreshHotkey(controller);
 
             _manager = new MainWindow(controller);
-            _panel = new QuickPanel(controller);
+            _updates = new AppUpdateService(Dispatcher, (manager, update, cancellation) =>
+                PrepareUpdateAsync(repository, dataDirectory, manager, update, cancellation));
+            _panel = new QuickPanel(controller, _updates);
             _manager.QuickPanelRequested += (_, _) => ShowPanel();
             _panel.ManagerRequested += (_, _) => ShowManager();
             MainWindow = _manager;
+#if !UPDATE_TEST_BUILD
             _tray = new TrayIcon(ShowManager, ShowPanel, ShutdownSafely);
             _clipboardWatcher = new ClipboardWatcher();
-            _clipboardWatcher.Changed += (_, _) => controller.OnClipboardChanged();
+            _clipboardWatcher.Changed += (_, _) => { if (!_updateFrozen) controller.OnClipboardChanged(); };
             RefreshHotkey(controller);
-            _manager.Show();
+#endif
+            if (resume.Panel is { } panelState) _panel.ShowAfterUpdate(panelState);
+            else _manager.Show();
+            if (resume.Notice is { } notice) UiPrompt.Notify(_panel.IsVisible ? _panel : _manager.IsVisible ? _manager : null, "更新提醒", notice);
+            _updates.Start();
+#if UPDATE_TEST_BUILD
+            UpdateTestHarness.Drive(this, _updates, _manager, _panel, repository, resume.Panel is not null);
+#endif
         }
         catch (OperationCanceledException)
         {
@@ -57,8 +80,13 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
+#if UPDATE_TEST_BUILD
+            UpdateTestHarness.RecordStartupFailure(ex);
+            Shutdown(1);
+#else
             UiPrompt.Notify(null, "零零快捷剪貼板 2.0", $"新版無法啟動：{ex.Message}\n舊版資料未變更。");
             Shutdown();
+#endif
         }
     }
 
@@ -163,17 +191,67 @@ public partial class App : System.Windows.Application
 
     private void ShutdownSafely()
     {
+        if (_updateFrozen) return;
         if (_manager?.TryPrepareToClose() == false) return;
+        _shuttingDown = true;
+        _updates?.Dispose();
         _manager?.AllowClose();
+        _panel?.AllowClose();
         Shutdown();
+    }
+
+    private async Task PrepareUpdateAsync(ClipboardRepository repository, string dataDirectory,
+        UpdateManager manager, UpdateInfo update, CancellationToken cancellation)
+    {
+        while (_manager!.IsBusyForUpdate || _panel!.IsBusyForUpdate || Mouse.Captured is not null ||
+               Windows.OfType<Window>().Any(w => w.IsVisible && w != _manager && w != _panel))
+            await Task.Delay(150, cancellation);
+        cancellation.ThrowIfCancellationRequested();
+        if (_shuttingDown) throw new OperationCanceledException();
+        var panelState = _panel.CaptureResumeState();
+        _updateFrozen = true;
+        var frozenWindows = Windows.OfType<Window>().Where(w => w.IsEnabled).ToArray();
+        foreach (var window in frozenWindows) window.IsEnabled = false;
+        try
+        {
+            if (!_manager.TryPrepareToClose())
+                throw new InvalidOperationException("草稿未能保存，已取消重啟。請在管理視窗保存後再重試。");
+            _updateJournal = await Task.Run(() => UpdatePreparation.Create(repository, dataDirectory, manager,
+                update, panelState, cancellation), cancellation);
+            await UpdatePreparation.StartHandoffAsync(_updateJournal, cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            _manager.AllowClose();
+            _panel.AllowClose();
+            _shuttingDown = true;
+            Shutdown();
+        }
+        catch
+        {
+            if (_updateJournal is { } journal)
+            {
+                // Failure cleanup must not leave the UI frozen when a full disk or denied write
+                // is the very reason the update failed. Without exit-ready the helper cannot apply.
+                try { UpdateJournal.WriteAtomic(Path.Combine(journal.JobDirectory, "abort"), true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                try { journal.ClearActive(); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                _updateJournal = null;
+            }
+            _updateFrozen = false;
+            foreach (var window in frozenWindows) window.IsEnabled = true;
+            throw;
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _updates?.Dispose();
         _keyboard?.Dispose();
         _clipboardWatcher?.Dispose();
         _tray?.Dispose();
         _singleInstance?.Dispose();
         base.OnExit(e);
+        if (_updateJournal is { } journal && e.ApplicationExitCode == 0)
+            UpdateJournal.WriteAtomic(Path.Combine(journal.JobDirectory, "exit-ready"), true);
     }
 }

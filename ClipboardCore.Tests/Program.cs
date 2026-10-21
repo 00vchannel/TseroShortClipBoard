@@ -54,6 +54,29 @@ try
 
     var backupPath = Path.Combine(isolatedRoot, "verified.sqlite");
     repository.CreateBackup(backupPath);
+    var updateFingerprint = repository.CaptureUpdateFingerprint();
+    ClipboardRepository.RequireMatchingFingerprints(updateFingerprint, ClipboardRepository.CaptureUpdateFingerprint(backupPath));
+    Check(updateFingerprint.Count == 6, "更新核對涵蓋全部六個資料表且一致性備份相同");
+    repository.SetSetting("update-fingerprint-test", "同筆數不同內容甲");
+    var beforeMutation = repository.CaptureUpdateFingerprint();
+    repository.SetSetting("update-fingerprint-test", "同筆數不同內容乙");
+    var mismatchDetected = false;
+    try { ClipboardRepository.RequireMatchingFingerprints(beforeMutation, repository.CaptureUpdateFingerprint()); }
+    catch (InvalidDataException) { mismatchDetected = true; }
+    Check(mismatchDetected, "更新雜湊偵測筆數不變的內容改動");
+    var packageRoot = Path.Combine(isolatedRoot, "package-verification");
+    Directory.CreateDirectory(Path.Combine(packageRoot, "packages"));
+    var packageFile = Path.Combine(packageRoot, "packages", "synthetic.nupkg");
+    File.WriteAllBytes(packageFile, [1, 2, 3, 4]);
+    var packageJournal = new UpdateJournal(Guid.NewGuid().ToString("N"), isolatedRoot, packageRoot,
+        Path.Combine(packageRoot, "current"), Path.Combine(packageRoot, "app.exe"), Path.Combine(packageRoot, "Update.exe"),
+        packageFile, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(new byte[] { 1, 2, 3, 4 })), 4,
+        "2.1.1", 0, 0, updateFingerprint, new("", null, false, null));
+    packageJournal.VerifyPackage();
+    File.WriteAllBytes(packageFile, [1, 2, 3, 5]);
+    var damagedPackageRejected = false;
+    try { packageJournal.VerifyPackage(); } catch (InvalidDataException) { damagedPackageRejected = true; }
+    Check(damagedPackageRejected, "同大小的損壞套件不能交接安裝");
     repository.ClearHistory();
     var safetyPath = repository.RestoreBackup(backupPath);
     Check(File.Exists(safetyPath) && repository.ListHistory().Count == 2, "備份還原與還原前保護");

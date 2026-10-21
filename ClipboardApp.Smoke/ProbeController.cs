@@ -13,6 +13,7 @@ internal sealed class ProbeController(ClipboardSnapshot snapshot) : IClipboardCo
     public double FontScale { get; private set; } = 1;
     public bool FailSnippetSave { get; set; }
     public bool FailDraftSave { get; set; }
+    public bool FailCopy { get; set; }
     public bool AutostartReadable { get; set; } = true;
     public List<DraftView> SavedDrafts { get; } = [];
 
@@ -20,7 +21,7 @@ internal sealed class ProbeController(ClipboardSnapshot snapshot) : IClipboardCo
     public ClipboardSettings GetSettings() => new("right alt", false, FontScale, Theme, "", AutostartReadable);
     public void ChangeTheme(string theme) { Theme = theme; SettingsChanged?.Invoke(this, EventArgs.Empty); }
     public void ChangeFontScale(double scale) { FontScale = scale; SettingsChanged?.Invoke(this, EventArgs.Empty); }
-    public bool CopyText(string text) { Copied.Add(text); return true; }
+    public bool CopyText(string text) { if (FailCopy) return false; Copied.Add(text); return true; }
     public void ReorderSnippets(Guid? categoryId, IReadOnlyList<Guid> orderedIds) => LastOrderedIds = orderedIds.ToArray();
     public void SetHotkey(string hotkey) => throw new NotSupportedException();
     public void SetAutostart(bool enabled) => throw new NotSupportedException();

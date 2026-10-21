@@ -8,10 +8,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>ZeroZeroClipboard</AssemblyName>
     <RootNamespace>ClipboardApp</RootNamespace>
-    <Version>2.0.0</Version>
+    <Version>2.1.4</Version>
+    <StartupObject>ClipboardApp.Program</StartupObject>
+    <DefineConstants Condition="'$(UpdateTestBuild)' == 'true'">$(DefineConstants);UPDATE_TEST_BUILD</DefineConstants>
     <ApplicationIcon>..\assets\00monstericon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\ClipboardCore\ClipboardCore.csproj" />
+    <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="ClipboardApp.Smoke" /></ItemGroup>
 </Project>

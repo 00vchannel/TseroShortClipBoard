@@ -44,6 +44,22 @@ static void Run()
         [new CategoryView(firstId, "工作", 0), new CategoryView(secondId, "生活", 1)],
         snippets, history, [], new Dictionary<Guid, DraftView>(), false));
     var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+    if (Environment.GetCommandLineArgs().Contains("--official-only"))
+    {
+        OfficialPromptsSmoke.Run(root);
+        application.Shutdown();
+        return;
+    }
+    PromptSmoke.Run(controller);
+    if (Environment.GetCommandLineArgs().Contains("--prompt-only"))
+    {
+        application.Shutdown();
+        return;
+    }
+    OfficialPromptsSmoke.Run(root);
+    controller.ChangeTheme("dark");
+    controller.ChangeFontScale(1);
+    UpdateSmoke.Run(controller, root);
     CheckFirstStartup(root, application);
     var prompt = typeof(MainWindow).Assembly.GetType("ClipboardApp.UiPrompt")
         ?? throw new Exception("找不到共用對話框");

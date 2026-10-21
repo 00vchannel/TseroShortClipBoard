@@ -39,11 +39,17 @@ public partial class MainWindow : Window
     private ListMode mode;
     private Guid? selectedCategoryId;
     private Guid? editingId;
+    private bool ShowingOfficial => mode == ListMode.Snippets && selectedCategoryId == OfficialPrompts.CategoryId;
     private string editingEmoji = "";
     private bool isLoading;
     private bool allowClose;
     private bool draftDirty;
     private Point dragStart;
+    private bool updateComposition;
+    private DateTime lastEditUtc;
+    private bool updateDragActive;
+    public bool IsBusyForUpdate => updateComposition || updateDragActive ||
+        DateTime.UtcNow - lastEditUtc < TimeSpan.FromMilliseconds(750);
     private Guid? draggingSnippetId;
     private ListBoxItem? draggingSnippetRow;
     private DropTargetIndicator? dropTargetIndicator;
@@ -56,6 +62,11 @@ public partial class MainWindow : Window
         snapshot = controller.GetSnapshot();
         selectedCategoryId = snapshot.Categories.OrderBy(c => c.SortOrder).FirstOrDefault()?.Id ?? Guid.Empty;
         InitializeComponent();
+        TextCompositionManager.AddPreviewTextInputStartHandler(this, (_, _) => updateComposition = true);
+        TextCompositionManager.AddPreviewTextInputUpdateHandler(this, (_, _) => updateComposition = true);
+        AddHandler(TextCompositionManager.TextInputEvent, new TextCompositionEventHandler((_, _) =>
+            { updateComposition = false; lastEditUtc = DateTime.UtcNow; }), handledEventsToo: true);
+        LostKeyboardFocus += (_, _) => updateComposition = false;
         ViewSelector.ItemsSource = new[]
         {
             new ListModeChoice("常用文字"), new ListModeChoice("複製歷史"),
@@ -93,11 +104,13 @@ public partial class MainWindow : Window
             isLoading = true;
             var filterChoices = new List<CategoryChoice> { new(null, "所有分類"), new(Guid.Empty, "未分類") };
             filterChoices.AddRange(snapshot.Categories.OrderBy(c => c.SortOrder).Select(c => new CategoryChoice(c.Id, c.Name)));
+            filterChoices.Add(new CategoryChoice(OfficialPrompts.CategoryId, "官方提示語 · 內建唯讀"));
             if (selectedCategoryId is Guid selected && selected != Guid.Empty && filterChoices.All(c => c.Id != selected))
                 selectedCategoryId = snapshot.Categories.OrderBy(c => c.SortOrder).FirstOrDefault()?.Id ?? Guid.Empty;
             CategoryList.ItemsSource = filterChoices;
             CategoryList.SelectedItem = filterChoices.First(c => c.Id == selectedCategoryId);
             RefreshCategoryChoices();
+            UpdateListActions();
             RefreshLists();
             PauseHistoryButton.Header = snapshot.IsHistoryPaused ? "繼續記錄複製歷史" : "暫停記錄複製歷史";
             isLoading = false;
@@ -123,7 +136,7 @@ public partial class MainWindow : Window
         var terms = SearchBox.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         bool Match(string value) => terms.All(t => value.Contains(t, StringComparison.OrdinalIgnoreCase));
         var selectedSnippetIds = SnippetList.SelectedItems.Cast<SnippetView>().Select(s => s.Id).ToHashSet();
-        var snippets = snapshot.Snippets
+        var snippets = (ShowingOfficial ? OfficialPrompts.Items : snapshot.Snippets)
             .Where(s => !string.IsNullOrWhiteSpace(SearchBox.Text) || selectedCategoryId == null ||
                         (selectedCategoryId == Guid.Empty ? s.CategoryId == null : s.CategoryId == selectedCategoryId))
             .Where(s => Match(s.Title + " " + s.Content))
@@ -178,6 +191,30 @@ public partial class MainWindow : Window
         RefreshLists();
     }
 
+    private void UpdateListActions()
+    {
+        var personal = mode == ListMode.Snippets && !ShowingOfficial;
+        var personalVisibility = personal ? Visibility.Visible : Visibility.Collapsed;
+        SnippetList.DataContext = personalVisibility;
+        NewSnippetButton.Visibility = MoveAction.Visibility = DeleteAction.Visibility = personalVisibility;
+        ModeActionButton.Visibility = ShowingOfficial ? Visibility.Collapsed : Visibility.Visible;
+        var customCategory = mode == ListMode.Snippets && selectedCategoryId is Guid id &&
+            snapshot.Categories.Any(c => c.Id == id);
+        RenameCategoryAction.IsEnabled = DeleteCategoryAction.IsEnabled =
+            MoveCategoryUpAction.IsEnabled = MoveCategoryDownAction.IsEnabled = customCategory;
+        SaveButton.Visibility = ShowingOfficial ? Visibility.Collapsed : Visibility.Visible;
+        CopyOfficialButton.Visibility = ShowingOfficial ? Visibility.Visible : Visibility.Collapsed;
+        CopyOfficialButton.IsEnabled = ShowingOfficial && OfficialPrompts.Items.Any(s => s.Id == editingId);
+        EditorCategory.Visibility = ShowingOfficial ? Visibility.Collapsed : Visibility.Visible;
+        OfficialCategoryLabel.Visibility = ShowingOfficial ? Visibility.Visible : Visibility.Collapsed;
+        if (ShowingOfficial)
+        {
+            ListTitle.Text = OfficialPrompts.CategoryName;
+            EditorHeading.Text = "提示語全文";
+        }
+        UpdateDragHandleAvailability();
+    }
+
     private void ClearEditor()
     {
         draftTimer.Stop();
@@ -195,15 +232,17 @@ public partial class MainWindow : Window
 
     private void SetEditorEnabled(bool enabled)
     {
-        bool editable = enabled && mode is ListMode.Snippets or ListMode.Drafts;
+        bool editable = enabled && (mode is ListMode.Snippets or ListMode.Drafts) && !OfficialPrompts.IsOfficial(editingId);
         TitleBox.IsReadOnly = !editable;
         ContentBox.IsReadOnly = !editable;
         EditorCategory.IsEnabled = editable;
         SaveButton.IsEnabled = editable;
+        UpdateListActions();
     }
 
     private void LoadSnippet(SnippetView snippet, bool readOnly = false)
     {
+        readOnly |= OfficialPrompts.IsOfficial(snippet.Id);
         isLoading = true;
         editingId = snippet.Id;
         draftDirty = false;
@@ -212,7 +251,7 @@ public partial class MainWindow : Window
         TitleBox.Text = draft?.Title ?? snippet.Title;
         ContentBox.Text = draft?.Content ?? snippet.Content;
         SelectEditorCategory(draft is null ? snippet.CategoryId : draft.CategoryId);
-        DraftStatus.Text = draft is null ? "已儲存" : "有未儲存草稿";
+        DraftStatus.Text = OfficialPrompts.IsOfficial(snippet.Id) ? "內建唯讀" : draft is null ? "已儲存" : "有未儲存草稿";
         isLoading = false;
         SetEditorEnabled(true);
     }
@@ -226,6 +265,7 @@ public partial class MainWindow : Window
     private bool FlushDraft()
     {
         draftTimer.Stop();
+        if (OfficialPrompts.IsOfficial(editingId)) return true;
         if (isLoading || editingId is not Guid id || mode is not (ListMode.Snippets or ListMode.Drafts) || !draftDirty) return true;
         try
         {
@@ -241,6 +281,8 @@ public partial class MainWindow : Window
     private void EditorCategory_SelectionChanged(object sender, SelectionChangedEventArgs e) => MarkDraftDirty();
     private void MarkDraftDirty()
     {
+        if (OfficialPrompts.IsOfficial(editingId)) return;
+        lastEditUtc = DateTime.UtcNow;
         if (isLoading || editingId is null || mode is not (ListMode.Snippets or ListMode.Drafts)) return;
         DraftStatus.Text = "尚未儲存";
         draftDirty = true;
@@ -250,6 +292,7 @@ public partial class MainWindow : Window
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
+        if (ShowingOfficial || OfficialPrompts.IsOfficial(editingId)) return;
         if (editingId is not Guid id) return;
         draftTimer.Stop();
         try
@@ -273,6 +316,7 @@ public partial class MainWindow : Window
 
     private void NewSnippet_Click(object sender, RoutedEventArgs e)
     {
+        if (ShowingOfficial) return;
         if (!FlushDraft()) return;
         SnippetList.SelectedItems.Clear();
         isLoading = true;
@@ -333,7 +377,7 @@ public partial class MainWindow : Window
     private void UpdateDragHandleAvailability()
     {
         if (SnippetList is null || SearchBox is null) return;
-        SnippetList.Tag = mode == ListMode.Snippets && selectedCategoryId is Guid &&
+        SnippetList.Tag = mode == ListMode.Snippets && !ShowingOfficial && selectedCategoryId is Guid &&
                           string.IsNullOrWhiteSpace(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -400,6 +444,7 @@ public partial class MainWindow : Window
 
     private void RenameCategory_Click(object sender, RoutedEventArgs e)
     {
+        if (OfficialPrompts.IsOfficial(selectedCategoryId)) return;
         if (CategoryList.SelectedItem is not CategoryChoice { Id: Guid id } item || id == Guid.Empty) { SetStatus("請先選擇自訂分類"); return; }
         var name = UiPrompt.Ask(this, "重新命名分類", "分類名稱", item.Name);
         if (string.IsNullOrWhiteSpace(name)) return;
@@ -409,6 +454,7 @@ public partial class MainWindow : Window
 
     private void DeleteCategory_Click(object sender, RoutedEventArgs e)
     {
+        if (OfficialPrompts.IsOfficial(selectedCategoryId)) return;
         if (CategoryList.SelectedItem is not CategoryChoice { Id: Guid id } item || id == Guid.Empty) { SetStatus("請先選擇自訂分類"); return; }
         if (!UiPrompt.Confirm(this, "刪除分類", $"刪除「{item.Name}」？其中的文字會移至未分類。", "刪除分類")) return;
         try
@@ -426,6 +472,7 @@ public partial class MainWindow : Window
 
     private void MoveCategory(int direction)
     {
+        if (OfficialPrompts.IsOfficial(selectedCategoryId)) return;
         if (CategoryList.SelectedItem is not CategoryChoice { Id: Guid id } || id == Guid.Empty) { SetStatus("請先選擇自訂分類"); return; }
         var ordered = snapshot.Categories.OrderBy(c => c.SortOrder).Select(c => c.Id).ToList();
         var index = ordered.IndexOf(id);
@@ -438,6 +485,7 @@ public partial class MainWindow : Window
 
     private void MoveSelected_Click(object sender, RoutedEventArgs e)
     {
+        if (ShowingOfficial || SnippetList.SelectedItems.Cast<SnippetView>().Any(s => OfficialPrompts.IsOfficial(s.Id))) return;
         var ids = SnippetList.SelectedItems.Cast<SnippetView>().Select(s => s.Id).ToList();
         if (ids.Count == 0) { SetStatus("請先選擇文字，可用 Ctrl 或 Shift 多選"); return; }
         var choices = new List<CategoryChoice> { new(null, "未分類") };
@@ -458,6 +506,7 @@ public partial class MainWindow : Window
 
     private void DeleteSelected_Click(object sender, RoutedEventArgs e)
     {
+        if (ShowingOfficial || SnippetList.SelectedItems.Cast<SnippetView>().Any(s => OfficialPrompts.IsOfficial(s.Id))) return;
         var ids = SnippetList.SelectedItems.Cast<SnippetView>().Select(s => s.Id).ToList();
         if (ids.Count == 0) { SetStatus("請先選擇文字"); return; }
         try
@@ -475,6 +524,7 @@ public partial class MainWindow : Window
     {
         e.Handled = true;
         if (mode != ListMode.Snippets || sender is not Button { DataContext: SnippetView snippet }) return;
+        if (OfficialPrompts.IsOfficial(snippet.Id)) return;
         if (!UiPrompt.Confirm(this, "刪除文字", $"將「{snippet.Title}」移至垃圾桶？之後仍可復原。", "移至垃圾桶")) return;
         try
         {
@@ -570,6 +620,12 @@ public partial class MainWindow : Window
         catch (Exception ex) { SetError("還原失敗，原資料應保持不變", ex); }
     }
 
+    private void CopyOfficial_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ShowingOfficial || OfficialPrompts.Items.FirstOrDefault(s => s.Id == editingId) is not { } item) return;
+        SetStatus(controller.CopyText(item.Content) ? "已複製全文" : "剪貼簿暫時無法寫入，請重試");
+    }
+
     private void OpenQuickPanel_Click(object sender, RoutedEventArgs e) => QuickPanelRequested?.Invoke(this, EventArgs.Empty);
 
     private void Settings_Click(object sender, RoutedEventArgs e)
@@ -609,9 +665,10 @@ public partial class MainWindow : Window
     {
         draggingSnippetId = null;
         draggingSnippetRow = null;
+        if (ShowingOfficial) return;
         if (mode != ListMode.Snippets || selectedCategoryId is not Guid categoryId ||
             !string.IsNullOrWhiteSpace(SearchBox.Text) || sender is not FrameworkElement { DataContext: SnippetView snippet } ||
-            snippet.CategoryId != (categoryId == Guid.Empty ? null : categoryId)) return;
+            OfficialPrompts.IsOfficial(snippet.Id) || snippet.CategoryId != (categoryId == Guid.Empty ? null : categoryId)) return;
         draggingSnippetId = snippet.Id;
         draggingSnippetRow = FindListItem(sender as DependencyObject);
         dragStart = e.GetPosition(SnippetList);
@@ -632,9 +689,11 @@ public partial class MainWindow : Window
         {
             SnippetList.GiveFeedback += FollowCursor;
         }
+        updateDragActive = true;
         try { DragDrop.DoDragDrop(SnippetList, new DataObject("snippet-order", id), DragDropEffects.Move); }
         finally
         {
+            updateDragActive = false;
             SnippetList.GiveFeedback -= FollowCursor;
             ClearDropTarget();
         }
@@ -650,7 +709,7 @@ public partial class MainWindow : Window
 
     private void SnippetList_DragOver(object sender, DragEventArgs e)
     {
-        if (mode != ListMode.Snippets || !e.Data.GetDataPresent("snippet-order") ||
+        if (ShowingOfficial || mode != ListMode.Snippets || !e.Data.GetDataPresent("snippet-order") ||
             selectedCategoryId is not Guid categoryId || !string.IsNullOrWhiteSpace(SearchBox.Text))
         {
             ClearDropTarget();
@@ -699,7 +758,7 @@ public partial class MainWindow : Window
     private void SnippetList_Drop(object sender, DragEventArgs e)
     {
         ClearDropTarget();
-        if (mode != ListMode.Snippets || !e.Data.GetDataPresent("snippet-order") ||
+        if (ShowingOfficial || mode != ListMode.Snippets || !e.Data.GetDataPresent("snippet-order") ||
             selectedCategoryId is not Guid categoryId || !string.IsNullOrWhiteSpace(SearchBox.Text)) return;
         var target = FindListItem(e.OriginalSource as DependencyObject)?.DataContext as SnippetView;
         var moving = (Guid)e.Data.GetData("snippet-order")!;
@@ -790,13 +849,17 @@ internal static class UiPrompt
 
     private static Window MakeDialog(Window? owner, string title)
     {
+        // Startup and tray notifications may supply a manager which has never been shown, is
+        // hidden, or has already closed. Keep it as the theme source, not as a native owner.
+        var visibleOwner = owner is { IsVisible: true } &&
+            new System.Windows.Interop.WindowInteropHelper(owner).Handle != IntPtr.Zero ? owner : null;
         var dialog = new Window
         {
-            Owner = owner, Title = title, Width = Math.Min(440, SystemParameters.WorkArea.Width - 24),
+            Owner = visibleOwner, Title = title, Width = Math.Min(440, SystemParameters.WorkArea.Width - 24),
             MaxHeight = Math.Max(200, SystemParameters.WorkArea.Height - 24), SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = owner is null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner,
+            WindowStartupLocation = visibleOwner is null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner,
             WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent,
-            ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false,
+            ResizeMode = ResizeMode.NoResize, ShowInTaskbar = visibleOwner is null,
             FontFamily = new FontFamily("Microsoft JhengHei UI"), FontSize = owner?.FontSize ?? 14
         };
         if (owner?.Resources.MergedDictionaries.FirstOrDefault() is { } theme)

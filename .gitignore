@@ -29,3 +29,6 @@
 /build/
 /.build-ui-smoke/
 __pycache__/
+/.build-packages/
+/.build-tools/
+/artifacts/

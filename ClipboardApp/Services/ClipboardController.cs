@@ -56,7 +56,7 @@ public sealed class ClipboardController : IClipboardController
         var previousKind = previous is null ? RegistryValueKind.String : key.GetValueKind(AutostartValue);
         if (enabled)
         {
-            var path = Environment.ProcessPath ?? throw new InvalidOperationException("找不到程式位置");
+            var path = UpdatePreparation.StableEntryPath();
             if (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("目前不是可開機啟動的發佈版本");
             key.SetValue(AutostartValue, $"\"{path}\"");
@@ -78,13 +78,32 @@ public sealed class ClipboardController : IClipboardController
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(AutostartKey);
-            return Environment.ProcessPath is { } path &&
+            return UpdatePreparation.StableEntryPath() is { } path &&
                 string.Equals(key?.GetValue(AutostartValue) as string, $"\"{path}\"", StringComparison.OrdinalIgnoreCase);
         }
-        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException or InvalidOperationException)
         {
             return null;
         }
+    }
+
+    internal void MigrateAutostartEntry()
+    {
+        // Only move an existing enabled registration belonging to this executable.
+        try
+        {
+            var entry = UpdatePreparation.StableEntryPath();
+            using var key = Registry.CurrentUser.OpenSubKey(AutostartKey, writable: true);
+            if (key?.GetValue(AutostartValue) is not string previous || string.IsNullOrWhiteSpace(previous) ||
+                string.Equals(previous, $"\"{entry}\"", StringComparison.OrdinalIgnoreCase)) return;
+            var oldPath = previous.Trim('"');
+            if (!Path.IsPathFullyQualified(oldPath) || !File.Exists(oldPath)) return;
+            var identity = System.Diagnostics.FileVersionInfo.GetVersionInfo(oldPath);
+            if (identity.OriginalFilename is not "ZeroZeroClipboard.dll" and not "ZeroZeroClipboard.exe") return;
+            key.SetValue(AutostartValue, $"\"{entry}\"");
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException or InvalidOperationException)
+        { /* Preserve the original registration if Windows denies access. */ }
     }
 
     public void SetFontScale(double scale)
@@ -129,6 +148,7 @@ public sealed class ClipboardController : IClipboardController
 
     public Guid SaveSnippet(Guid? id, string title, string emoji, string content, Guid? categoryId)
     {
+        OfficialPrompts.RequirePersonal(id, categoryId);
         var saved = _repository.SaveSnippet(new Snippet { Id = id ?? Guid.Empty, Title = title, Emoji = emoji, Content = content, CategoryId = categoryId });
         NotifySaved();
         return saved.Id;
@@ -136,20 +156,31 @@ public sealed class ClipboardController : IClipboardController
 
     public void SaveDraft(Guid id, string title, string emoji, string content, Guid? categoryId)
     {
+        OfficialPrompts.RequirePersonal(id, categoryId);
         _repository.SaveDraft(new SnippetDraft { SnippetId = id, Title = title, Emoji = emoji, Content = content, CategoryId = categoryId });
         NotifySaved();
     }
 
-    public void DiscardDraft(Guid id) { _repository.DeleteDraft(id); NotifySaved(); }
-    public void DeleteSnippets(IEnumerable<Guid> ids) { _repository.DeleteSnippets(ids.ToArray()); NotifySaved(); }
-    public void RestoreSnippet(Guid id) { _repository.RestoreSnippets([id]); NotifySaved(); }
-    public void PermanentlyDeleteSnippets(IEnumerable<Guid> ids) { _repository.PermanentlyDeleteSnippets(ids.ToArray()); NotifySaved(); }
-    public void MoveSnippets(IEnumerable<Guid> ids, Guid? categoryId) { _repository.MoveSnippets(ids.ToArray(), categoryId); NotifySaved(); }
-    public void ReorderSnippets(Guid? categoryId, IReadOnlyList<Guid> orderedIds) { _repository.ReorderSnippets(categoryId, orderedIds); NotifySaved(); }
+    public void DiscardDraft(Guid id) { OfficialPrompts.RequirePersonal(id); _repository.DeleteDraft(id); NotifySaved(); }
+    public void DeleteSnippets(IEnumerable<Guid> ids) { _repository.DeleteSnippets(OfficialPrompts.RequirePersonal(ids)); NotifySaved(); }
+    public void RestoreSnippet(Guid id) { OfficialPrompts.RequirePersonal(id); _repository.RestoreSnippets([id]); NotifySaved(); }
+    public void PermanentlyDeleteSnippets(IEnumerable<Guid> ids) { _repository.PermanentlyDeleteSnippets(OfficialPrompts.RequirePersonal(ids)); NotifySaved(); }
+    public void MoveSnippets(IEnumerable<Guid> ids, Guid? categoryId)
+    {
+        OfficialPrompts.RequirePersonal(categoryId);
+        _repository.MoveSnippets(OfficialPrompts.RequirePersonal(ids), categoryId);
+        NotifySaved();
+    }
+    public void ReorderSnippets(Guid? categoryId, IReadOnlyList<Guid> orderedIds)
+    {
+        OfficialPrompts.RequirePersonal(categoryId);
+        _repository.ReorderSnippets(categoryId, OfficialPrompts.RequirePersonal(orderedIds));
+        NotifySaved();
+    }
     public Guid AddCategory(string name) { var category = _repository.AddCategory(name); NotifySaved(); return category.Id; }
-    public void RenameCategory(Guid id, string name) { _repository.RenameCategory(id, name); NotifySaved(); }
-    public void DeleteCategory(Guid id) { _repository.DeleteCategory(id); NotifySaved(); }
-    public void ReorderCategories(IReadOnlyList<Guid> ids) { _repository.ReorderCategories(ids); NotifySaved(); }
+    public void RenameCategory(Guid id, string name) { OfficialPrompts.RequirePersonal(id); _repository.RenameCategory(id, name); NotifySaved(); }
+    public void DeleteCategory(Guid id) { OfficialPrompts.RequirePersonal(id); _repository.DeleteCategory(id); NotifySaved(); }
+    public void ReorderCategories(IReadOnlyList<Guid> ids) { _repository.ReorderCategories(OfficialPrompts.RequirePersonal(ids)); NotifySaved(); }
     public void SetHistoryPaused(bool paused) { _repository.SetHistoryPaused(paused); NotifySaved(); }
     public void ClearHistory() { _repository.ClearHistory(); NotifySaved(); }
 

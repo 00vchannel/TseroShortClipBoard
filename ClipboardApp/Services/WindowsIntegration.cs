@@ -7,8 +7,15 @@ namespace ClipboardApp.Services;
 
 internal sealed class SingleInstanceGuard : IDisposable
 {
-    private const string MutexName = "Local\\ZeroZeroClipboardV2_SingleInstance";
-    private const string SignalName = "Local\\ZeroZeroClipboardV2_ShowWindow";
+    private static string MutexName => "Local\\ZeroZeroClipboardV2_SingleInstance" + TestInstanceSuffix;
+    private static string SignalName => "Local\\ZeroZeroClipboardV2_ShowWindow" + TestInstanceSuffix;
+    private static string TestInstanceSuffix =>
+#if UPDATE_TEST_BUILD
+        "_UpdateTest_" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(Program.DataDirectory)))[..16];
+#else
+        "";
+#endif
     private readonly Mutex? _mutex;
     private readonly EventWaitHandle? _signal;
     private readonly CancellationTokenSource _cancellation = new();

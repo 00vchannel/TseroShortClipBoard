@@ -1,6 +1,7 @@
 <Window x:Class="ClipboardApp.QuickPanel"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClipboardApp"
         Width="620" Height="760" MinWidth="360" MinHeight="450" ResizeMode="CanResizeWithGrip"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent" ShowInTaskbar="False"
         Topmost="True" Deactivated="Window_Deactivated" PreviewKeyDown="Window_PreviewKeyDown" Closing="Window_Closing">
@@ -18,12 +19,27 @@
                 <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <DockPanel Margin="2,0,2,15" LastChildFill="False">
-                <TextBlock Text="快捷取用" FontSize="23" FontWeight="Bold" DockPanel.Dock="Left"/>
-                <Button Content="✕" Click="Close_Click" DockPanel.Dock="Right" Padding="9,4"/>
-                <Button Content="管理" Click="Manager_Click" DockPanel.Dock="Right" Margin="0,0,8,0" Padding="11,4"
-                        ToolTip="開啟管理視窗"/>
-            </DockPanel>
+            <StackPanel Margin="2,0,2,15">
+                <Grid x:Name="PanelHeader" SizeChanged="PanelHeader_SizeChanged">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock x:Name="PanelTitle" Text="{x:Static local:AppVersion.QuickPanelTitle}" FontSize="23" FontWeight="Bold" HorizontalAlignment="Left" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <WrapPanel x:Name="HeaderActions" HorizontalAlignment="Right" SizeChanged="PanelHeader_SizeChanged">
+                        <Button x:Name="UpdateButton" Content="更新並重啟" Click="Update_Click" Visibility="Collapsed"
+                                Margin="0,0,8,0" Padding="11,4" AutomationProperties.Name="下載更新並自動重啟"/>
+                        <Button Content="管理" Click="Manager_Click" Margin="0,0,8,0" Padding="11,4" ToolTip="開啟管理視窗"/>
+                        <Button Content="✕" Click="Close_Click" Padding="9,4" AutomationProperties.Name="收起快捷面板"/>
+                    </WrapPanel>
+                </Grid>
+                <StackPanel x:Name="UpdateProgressArea" Visibility="Collapsed" Margin="0,10,0,0">
+                    <ProgressBar x:Name="UpdateProgress" Height="4" Minimum="0" Maximum="100" IsHitTestVisible="False"
+                                 AutomationProperties.Name="更新下載進度"/>
+                    <DockPanel Margin="0,5,0,0">
+                        <Button x:Name="CancelUpdateButton" Content="取消" DockPanel.Dock="Right" Padding="9,3" Click="CancelUpdate_Click"/>
+                        <Button x:Name="RetryUpdateButton" Content="重試" DockPanel.Dock="Right" Padding="9,3" Click="Update_Click" Visibility="Collapsed"/>
+                        <TextBlock x:Name="UpdateStatus" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                    </DockPanel>
+                </StackPanel>
+            </StackPanel>
             <Grid Grid.Row="1">
                 <TextBox x:Name="SearchBox" Height="44" TextChanged="SearchBox_TextChanged" ToolTip="搜尋標題與內容"/>
                 <TextBlock x:Name="SearchHint" Text="⌕  搜尋標題或內容" Foreground="{DynamicResource MutedBrush}"
@@ -34,10 +50,16 @@
                 <Button x:Name="SnippetsTab" Content="常用文字" Style="{StaticResource AccentButton}" Click="SnippetsTab_Click" Margin="0,0,7,0"/>
                 <Button x:Name="HistoryTab" Grid.Column="1" Content="複製歷史" Click="HistoryTab_Click"/>
             </Grid>
-            <ScrollViewer x:Name="CategoryScroller" Grid.Row="3" MaxHeight="126" Margin="0,0,0,10"
+            <Grid x:Name="CategoryArea" Grid.Row="3" Margin="0,0,0,10">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <ScrollViewer x:Name="CategoryScroller" MaxHeight="126" Margin="0,0,8,0"
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <WrapPanel x:Name="CategoryChips" Width="{Binding ViewportWidth, ElementName=CategoryScroller}"/>
             </ScrollViewer>
+                <Button x:Name="OfficialCategoryButton" Grid.Column="1" Content="官方提示語"
+                        VerticalAlignment="Top" Padding="11,7" Margin="0,0,0,7"
+                        ToolTip="內建唯讀提示語" Click="OfficialCategory_Click"/>
+            </Grid>
             <AdornerDecorator Grid.Row="4">
             <ListBox x:Name="ResultList"
                      PreviewMouseLeftButtonUp="ResultList_PreviewMouseLeftButtonUp"
