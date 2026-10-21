@@ -2,7 +2,7 @@
 
 [![下載 Windows 版](assets/download-windows.svg)](https://github.com/00vchannel/TseroShortClipBoard/releases/download/v2.1.5/ZeroZeroClipboard-win-x64-Portable.zip)
 
-![零零快捷剪貼板快捷面板預覽](assets/readme-preview.png)
+<img src="assets/readme-preview.png" alt="零零快捷剪貼板快捷面板預覽" width="388">
 
 把常用的回覆、範本或 AI 提示語存起來，需要時點一下就能複製，不用每次重新打字。
 
